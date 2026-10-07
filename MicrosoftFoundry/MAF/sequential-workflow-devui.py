@@ -12,7 +12,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from azure.identity.aio import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential
 
 from agent_framework import (
     Agent,
@@ -70,7 +70,7 @@ async def close_resource(resource: Any) -> None:
 async def create_agent(
     agent_name: str,
     agent_instructions: str,
-) -> tuple[Agent, DefaultAzureCredential]:
+) -> Agent:
     """Create an Azure AI Foundry-backed agent."""
 
     credential = DefaultAzureCredential()
@@ -89,7 +89,7 @@ async def create_agent(
 
     print(f"{agent_name} created successfully.")
 
-    return agent, credential
+    return agent
 
 
 class ResearcherExecutor(Executor):
@@ -156,7 +156,7 @@ class WriterExecutor(Executor):
 
 
 async def build_workflow() -> tuple[Any, list[Any]]:
-    researcher_agent, researcher_credential = await create_agent(
+    researcher_agent = await create_agent(
         agent_name="Researcher-Agent",
         agent_instructions=(
             "You are a careful and knowledgeable researcher. "
@@ -164,7 +164,7 @@ async def build_workflow() -> tuple[Any, list[Any]]:
         ),
     )
 
-    writer_agent, writer_credential = await create_agent(
+    writer_agent = await create_agent(
         agent_name="Writer-Agent",
         agent_instructions=(
             "You are a skilled essay writer. Turn supplied research notes "
@@ -200,8 +200,6 @@ async def build_workflow() -> tuple[Any, list[Any]]:
     resources = [
         researcher_agent,
         writer_agent,
-        researcher_credential,
-        writer_credential,
     ]
 
     return workflow, resources
