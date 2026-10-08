@@ -1,139 +1,247 @@
 """
-Sequential Workflow with MAF and Microsoft Foundry
+Sequential workflow with Microsoft Agent Framework, Azure AI Foundry and DevUI.
 
-This script demonstrates a simple sequential workflow:
-1. Researcher Agent gathers information on a topic.
-2. Writer Agent writes an essay based on the research.
-
-To run:
+Run:
     python sequential_workflow.py
 """
 
-import os
 import asyncio
+import inspect
 import logging
+import os
+from typing import Any
+
 from dotenv import load_dotenv
+from azure.identity import DefaultAzureCredential
+
 from agent_framework import (
+    Agent,
     Executor,
     WorkflowBuilder,
     WorkflowContext,
-    handler,
     WorkflowViz,
+    handler,
 )
-from agent_framework import ChatAgent
-from agent_framework.azure import AzureAIClient
-from azure.ai.projects.aio import AIProjectClient
-from azure.identity.aio import AzureCliCredential
 from agent_framework.devui import serve
+from agent_framework.foundry import FoundryChatClient
 
-# Load environment variables
+
 load_dotenv()
-project_endpoint = os.getenv("AI_FOUNDRY_PROJECT_ENDPOINT")
-model = os.getenv("AI_FOUNDRY_DEPLOYMENT_NAME")
 
-print("Project Endpoint:", project_endpoint)
-print("Model:", model)
+PROJECT_ENDPOINT = os.getenv("AI_FOUNDRY_PROJECT_ENDPOINT")
+MODEL_DEPLOYMENT_NAME = os.getenv("AI_FOUNDRY_DEPLOYMENT_NAME")
 
-# Async agent creation utility
-async def create_agent(agent_name: str, agent_instructions: str) -> ChatAgent:
-    credential = AzureCliCredential()
-    project_client = AIProjectClient(
-        endpoint=project_endpoint,
-        credential=credential
+if not PROJECT_ENDPOINT:
+    raise ValueError("AI_FOUNDRY_PROJECT_ENDPOINT saknas i .env-filen.")
+
+if not MODEL_DEPLOYMENT_NAME:
+    raise ValueError("AI_FOUNDRY_DEPLOYMENT_NAME saknas i .env-filen.")
+
+
+async def get_response_text(response: Any) -> str:
+    """Extract readable text from an MAF agent response."""
+
+    if hasattr(response, "get_final_response"):
+        response = await response.get_final_response()
+
+    if hasattr(response, "text") and response.text:
+        return str(response.text)
+
+    if hasattr(response, "content") and response.content:
+        return str(response.content)
+
+    return str(response)
+
+
+async def close_resource(resource: Any) -> None:
+    """Close a synchronous or asynchronous resource safely."""
+
+    close_method = getattr(resource, "close", None)
+
+    if close_method is None:
+        return
+
+    result = close_method()
+
+    if inspect.isawaitable(result):
+        await result
+
+
+async def create_agent(
+    agent_name: str,
+    agent_instructions: str,
+) -> Agent:
+    """Create an Azure AI Foundry-backed agent."""
+
+    credential = DefaultAzureCredential()
+
+    chat_client = FoundryChatClient(
+        project_endpoint=PROJECT_ENDPOINT,
+        model=MODEL_DEPLOYMENT_NAME,
+        credential=credential,
     )
-    openai_client = project_client.get_openai_client()
-    conversation = await openai_client.conversations.create()
-    conversation_id = conversation.id
-    print("Conversation ID:", conversation_id)
 
-    chat_client = AzureAIClient(
-        project_client=project_client,
-        conversation_id=conversation_id,
-        model_deployment_name=model
+    agent = Agent(
+        name=agent_name,
+        instructions=agent_instructions,
+        client=chat_client,
     )
 
-    try:
-        agent = chat_client.create_agent(
-            name=agent_name,
-            instructions=agent_instructions,
-        )
-        print(f"{agent_name} Agent created successfully!")
-        return agent
-    finally:
-        await chat_client.close()
-        await credential.close()
+    print(f"{agent_name} created successfully.")
 
-# Executor definitions
+    return agent
+
+
 class ResearcherExecutor(Executor):
-    def __init__(self, agent, **kwargs):
+    """Researches the incoming topic and sends notes to the writer."""
+
+    def __init__(self, agent: Agent, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.agent = agent
 
     @handler
-    async def handle(self, query: str, ctx: WorkflowContext[str]) -> None:
-        response = await self.agent.run(query)
-        await ctx.send_message(str(response))
+    async def handle(
+        self,
+        query: str,
+        ctx: WorkflowContext[str],
+    ) -> None:
+        prompt = f"""
+            Research this topic:
+
+            {query}
+
+            Provide concise, structured research notes for an essay writer.
+            Include benefits, risks, examples and nuanced perspectives.
+            """
+
+        response = await self.agent.run(prompt)
+        research_text = await get_response_text(response)
+
+        print("\n--- Researcher output ---\n")
+        print(research_text)
+
+        await ctx.send_message(research_text)
+
 
 class WriterExecutor(Executor):
-    def __init__(self, agent, **kwargs):
+    """Writes the final essay from the research notes."""
+
+    def __init__(self, agent: Agent, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.agent = agent
 
     @handler
-    async def handle(self, research_data: str, ctx: WorkflowContext[str]) -> None:
-        response = await self.agent.run(research_data)
-        await ctx.yield_output(str(response))
+    async def handle(
+        self,
+        research_data: str,
+        ctx: WorkflowContext[str],
+    ) -> None:
+        prompt = f"""
+            Write a balanced and engaging essay using the research notes below.
 
-async def build_workflow():
-    # Create agents
+            Research notes:
+            {research_data}
+
+            Use a title, introduction, clear paragraphs and conclusion.
+            Do not invent facts that are absent from the research notes.
+            """
+
+        response = await self.agent.run(prompt)
+        essay_text = await get_response_text(response)
+
+        print("\n--- Writer output ---\n")
+        print(essay_text)
+
+        await ctx.yield_output(essay_text)
+
+
+async def build_workflow() -> tuple[Any, list[Any]]:
     researcher_agent = await create_agent(
         agent_name="Researcher-Agent",
         agent_instructions=(
-            "You are a knowledgeable researcher. Your task is to gather information and provide insights on a given topic. "
-            "You should use reliable sources and present the information in a clear and concise manner."
-        )
+            "You are a careful and knowledgeable researcher. "
+            "Provide accurate, balanced and concise research notes."
+        ),
     )
+
     writer_agent = await create_agent(
         agent_name="Writer-Agent",
         agent_instructions=(
-            "You are a creative writer. Your task is to write an essay on a given topic. "
-            "You should focus on clarity, coherence, and engaging storytelling."
-        )
+            "You are a skilled essay writer. Turn supplied research notes "
+            "into a clear, coherent and engaging essay."
+        ),
     )
 
-    # Instantiate Executors
-    researcher_executor = ResearcherExecutor(researcher_agent, id="ResearcherExecutor")
-    writer_executor = WriterExecutor(writer_agent, id="WriterExecutor")
+    researcher_executor = ResearcherExecutor(
+        agent=researcher_agent,
+        id="researcher_executor",
+    )
 
-    # Build the workflow
+    writer_executor = WriterExecutor(
+        agent=writer_agent,
+        id="writer_executor",
+    )
+
     workflow = (
         WorkflowBuilder(
-            name="Sequential Research & Writing Workflow",
-            description="A two-step workflow: research a topic, then write an essay."
+            name="Sequential Research and Writing Workflow",
+            description="Researches a topic and writes an essay.",
+            start_executor=researcher_executor,
         )
-        .set_start_executor(researcher_executor)
         .add_edge(researcher_executor, writer_executor)
         .build()
     )
 
-    # Optionally, visualize the workflow (prints Mermaid diagram to console)
     viz = WorkflowViz(workflow)
-    mermaid_content = viz.to_mermaid()
-    print("Mermaid Diagram:\n", mermaid_content)
 
-    return workflow
+    print("\n--- Mermaid diagram ---\n")
+    print(viz.to_mermaid())
 
-def main():
-    """Launch the sequential workflow in DevUI."""
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logger = logging.getLogger(__name__)
-    logger.info("Starting Sequential Research & Writing Workflow")
-    logger.info("Available at: http://localhost:8090")
-    logger.info("Entity ID: workflow_sequential_research_writer")
+    resources = [
+        researcher_agent,
+        writer_agent,
+    ]
 
-    # Run async workflow builder and launch DevUI
-    workflow = asyncio.run(build_workflow())
-    serve(entities=[workflow], port=8090, auto_open=True, tracing_enabled=True)
+    return workflow, resources
+
+
+async def cleanup(resources: list[Any]) -> None:
+    """Closes agents and Azure credentials."""
+
+    print("\nCleaning up resources...")
+
+    for resource in resources:
+        try:
+            await close_resource(resource)
+        except Exception as error:
+            print(f"Cleanup warning: {error}")
+
+    print("Cleanup completed.")
+
+
+def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s: %(message)s",
+    )
+
+    print("Building workflow...")
+    workflow, resources = asyncio.run(build_workflow())
+
+    print("\nStarting DevUI...")
+    print("Open: http://localhost:8090")
+
+    try:
+        serve(
+            entities=[workflow],
+            port=8090,
+            auto_open=True,
+        )
+    except KeyboardInterrupt:
+        print("\nDevUI stopped by user.")
+    finally:
+        asyncio.run(cleanup(resources))
+
 
 if __name__ == "__main__":
     main()
