@@ -100,6 +100,15 @@ Treat model and agent entry points as separate attack surfaces:
 
 ## 6. Annotate versus block
 
+### Action applicability (models versus agents)
+
+| Action | Models | Agents (Preview) |
+|---|---:|---:|
+| Annotate | ✅ | ❌ |
+| Annotate and block | ✅ | ✅ |
+
+Annotate is a model-only standalone action. Agents only support annotate and block.
+
 ### Annotate
 
 **Annotate** detects and labels a risk but lets the content continue. The application can inspect or log the returned safety metadata and decide what to do.
@@ -171,10 +180,11 @@ Evaluation thresholds can become CI/CD release gates, but automation must enforc
 6. **Add guardrails and deterministic controls**: cover inputs, tools, outputs, schemas, approvals, and limits.
 7. **Test and trace**: use normal, edge, adversarial, and failure cases; inspect model and tool calls.
 8. **Evaluate**: measure quality, safety, retrieval, task outcome, and tool behaviour against repeatable tests.
-9. **Version and publish**: save a known version and expose a stable integration.
-10. **Monitor production**: watch latency, errors, token usage, safety signals, tool failures, and quality drift.
-11. **Improve or roll back**: change model, instructions, tools, retrieval, or policy; then rerun regression tests.
-12. **Retire**: remove access, revoke connections/identities, preserve required audit evidence, and migrate users.
+9. **Optimize hosted agents (preview)**: tune hosted-agent configuration and performance before publishing.
+10. **Version and publish**: save a known version and expose a stable integration.
+11. **Monitor production**: watch latency, errors, token usage, safety signals, tool failures, and quality drift.
+12. **Improve or roll back**: change model, instructions, tools, retrieval, or policy; then rerun regression tests.
+13. **Retire**: remove access, revoke connections/identities, preserve required audit evidence, and migrate users.
 
 ## 10. Runtime lifecycle of one agent request
 
@@ -228,7 +238,7 @@ An evaluator scores one dimension of quality, safety, retrieval, or agent behavi
 
 | Evaluator | Short explanation |
 |---|---|
-| **Groundedness** | Whether claims are supported by supplied/retrieved context. A true claim can still be ungrounded when the context does not support it. |
+| **Groundedness** | Whether claims are supported by supplied/retrieved context, scored 1–5 by a judge model. A true claim can still be ungrounded when the context does not support it. |
 | **Groundedness Pro** | Preview pass/fail evaluator using Azure AI Content Safety; no separate judge-model deployment is required. |
 | **Relevance** | Whether the response addresses the query. |
 | **Retrieval** | How effectively the system retrieves relevant information. |
@@ -356,7 +366,7 @@ For all types, data at rest remains in the designated Azure geography. The disti
 | **Regional Provisioned** | `ProvisionedManaged` | Selected Azure geography | Reserved PTUs | Predictable throughput plus geography boundary |
 | **Global Batch** | `GlobalBatch` | Any Azure region | Discounted asynchronous | Large global offline jobs |
 | **Data Zone Batch** | `DataZoneBatch` | Selected data zone | Discounted asynchronous | Large offline jobs with zone restriction |
-| **Developer** | `DeveloperTier` | See current model documentation | Pay per token | Short-lived fine-tuned-model evaluation |
+| **Developer** | `DeveloperTier` | See current model documentation | Pay per token | Short-lived fine-tuned-model evaluation (about 24-hour lifetime, no SLA or residency guarantee) |
 
 Availability is model- and region-specific.
 
