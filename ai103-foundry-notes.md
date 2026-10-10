@@ -401,6 +401,97 @@ Only validating a fine-tuned model temporarily?
 - **Batch:** lower-cost bulk processing, but asynchronous and unsuitable for interactive chat.
 - **Developer:** useful for evaluation, but temporary and not for normal production.
 
+## 22a. Provisioned Throughput Units (PTUs) — simple explanation
+
+### What "throughput" means
+
+**Throughput = how much work the model can do per minute**, measured in **tokens per minute** (a token ≈ a few characters). Both the text you send **in** (prompt) and the text the model sends **out** (answer) count toward it.
+
+- High throughput = handles many requests / long prompts / long answers at once.
+- Low throughput = fewer or smaller requests before it slows down or gets throttled.
+
+### What a PTU is
+
+A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** you buy for a model. You pay to guarantee a fixed tokens-per-minute capacity that is yours alone, instead of sharing capacity with others (Standard / pay-per-token).
+
+- More PTUs = more throughput = handles more traffic.
+- PTUs apply only to **Provisioned** deployment types.
+
+### How much you buy
+
+Each model defines a **minimum** number of PTUs and an **increment** (step size) to add more. How much one PTU is worth in tokens-per-minute depends on the **model**. The **Foundry capacity calculator** has the current numbers — always check there.
+
+### How you know how many PTUs you need
+
+You need more PTUs when you have more **requests per minute**, longer **prompts** (input), or longer **answers** (output). Enter those three numbers into the capacity calculator and it tells you how many PTUs to buy.
+
+### How PTUs work with quota
+
+- **Quota** = your *allowance* — the maximum PTUs you are allowed to deploy in a region, measured in PTUs.
+- **Deployment** = actually *using* some of that allowance.
+- PTU quota is **separate** from Standard (pay-per-token) TPM quota; one does not give you the other.
+- If you need more PTUs than your quota allows, **request a quota increase first**.
+- A monthly/yearly reservation only gives a **discount** — it does not change how much capacity you get.
+
+### Simple example
+
+A support chatbot: peak **60 requests/min**, prompt in ~**1,500 tokens**, answer out ~**500 tokens**.
+
+1. Put those numbers in the calculator → it says you need **100 PTUs**.
+2. Check quota. If it's only **50 PTUs**, request an increase to **100**.
+3. Create the deployment with **100 PTUs**.
+4. (Optional) Buy a monthly reservation to lower the cost.
+5. If traffic later exceeds what 100 PTUs can handle, requests get **throttled (429)** — add more PTUs or let overflow spill over to a Standard deployment.
+
+**Remember:** throughput = tokens/min the model can process; PTU = a block of reserved throughput you buy; quota = the max PTUs you're allowed (raise it before deploying more).
+
+## 22b. Standard versus Provisioned (same geography)
+
+Here both deployments keep processing **inside the same Azure geography** — the *only* difference is the capacity/billing dimension.
+
+| | **Standard** (`Standard`) | **Regional Provisioned** (`ProvisionedManaged`) |
+|---|---|---|
+| Where data is processed | Within your geography | Within your geography (same) |
+| How you pay | Per token (pay-as-you-go) | Reserved capacity = **PTUs** |
+| Capacity | **Shared** with other customers | **Reserved**, yours only |
+| Throughput | Varies, not guaranteed | Fixed, guaranteed tokens/min |
+| Latency | Can vary with load | Stable and even |
+
+### Where the line between them is
+
+The line is **how the capacity is "owned"**:
+
+- **Standard** → you reserve nothing. You send requests and pay per token, drawing against a **TPM quota** (a ceiling). The throughput you actually get depends on how much shared capacity is free at that moment; under heavy load it can slow down or throttle (429).
+- **Provisioned** → you **bought a fixed amount of PTUs up front**. That throughput is reserved for you around the clock, regardless of other customers. You pay for the block even when idle.
+
+> Simplest way to see it: **Standard = pay for what you use. Provisioned = pay for what you reserve.**
+
+### How the purchased capacity works (Provisioned)
+
+1. Size the need (peak requests/min + in/out tokens) in the calculator → e.g. **100 PTUs**.
+2. Ensure **PTU quota ≥ 100** in that region (request an increase otherwise).
+3. Create the deployment with 100 PTUs → that throughput is now locked and yours.
+4. Traffic within 100 PTUs runs fast and even.
+5. Traffic above 100 PTUs → throttled (429), or spills over to a Standard deployment if configured.
+6. A monthly/yearly reservation on those PTUs gives a discount (price only, not capacity).
+
+### Advantages of Provisioned over Standard
+
+- **Guaranteed throughput** — your capacity doesn't run out because other customers are busy.
+- **Stable, predictable latency** — even response times, important for production and SLAs.
+- **Predictable cost** — fixed price (especially with a reservation) instead of varying with usage.
+- **Protected under heavy load** — unaffected by "noisy neighbours" in the shared pool.
+
+### Downsides (for balance)
+
+- You **pay for the block even when idle** — expensive for low or spiky traffic.
+- Requires **capacity planning** and often a **quota increase** first.
+
+### Rule of thumb
+
+- **Low / spiky / unpredictable traffic** → Standard (pay per token, no reservation).
+- **High / steady / production traffic needing guaranteed speed and stable latency** → Provisioned.
+
 ---
 
 # Part V: High-value summary
