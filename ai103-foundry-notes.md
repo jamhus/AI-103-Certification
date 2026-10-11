@@ -224,34 +224,65 @@ An evaluator scores one dimension of quality, safety, retrieval, or agent behavi
 
 ## 13. General quality evaluators
 
-| Evaluator | Short explanation |
+**Coherence** and **Fluency** just check the writing itself (no reference needed):
+
+| Evaluator | In plain words |
 |---|---|
-| **Coherence** | Logical consistency and flow. |
-| **Fluency** | Readability and natural-language quality. |
-| **Similarity** | Semantic similarity to a reference. Similarity does not guarantee factual correctness. |
-| **F1** | Token overlap using the harmonic mean of precision and recall. |
-| **BLEU / GLEU** | N-gram overlap, often used for translation or reference-based generation. |
-| **ROUGE** | Reference overlap with emphasis on recall, often used for summaries. |
-| **METEOR** | Reference similarity with ordering and language variation considered. |
+| **Coherence** | Does the answer make sense and flow logically, without contradicting itself? |
+| **Fluency** | Is the language smooth and natural (grammar, wording)? |
+
+### Similarity, F1, BLEU/GLEU, ROUGE, METEOR — one idea, five flavours
+
+These all do **one thing**: compare the model's answer to a **reference answer** (a "correct" example you provide) and measure how much they match. They just match in different ways.
+
+Running example — the reference answer is **"The cat sat on the mat."**
+
+| Evaluator | What it looks at | On the example |
+|---|---|---|
+| **Similarity** | The **meaning**, not the exact words (uses AI to judge). | "A feline rested on the rug" → different words, same meaning → **high**. (Similar ≠ factually true, just close to the reference.) |
+| **F1** | **Single words** that match — did you include the right words, without adding junk? | "The cat sat on the big red soft mat indoors" → right words present but lots of extra → **lower**. |
+| **BLEU / GLEU** | **Short word-sequences (phrases) in order.** Common for **translation**. | "on the mat" in order scores; "mat the on" scores less. |
+| **ROUGE** | **Coverage** — how much of the reference's content you captured. Common for **summaries**. | Did your summary include the key points from the source? |
+| **METEOR** | Same idea but **most forgiving** — accepts **synonyms** and different word order. | reference "big", answer "large" → METEOR still counts it; the stricter ones would miss it. |
+
+**Simplest takeaway:** Similarity = meaning. The other four = word matching against a reference, from strict (F1, BLEU) to generous (METEOR).
 
 ## 14. RAG and grounding evaluators
 
-| Evaluator | Short explanation |
+**First, what is RAG?** The system **searches for documents** and then the model **answers using them**. So there are two things to check: did it **find the right documents**, and did it **use them properly**?
+
+Think of it like an open-book exam: first you pick the right page, then you answer from what's on it.
+
+### Did it find the right documents? (the search step)
+
+| Evaluator | In plain words |
 |---|---|
-| **Groundedness** | Whether claims are supported by supplied/retrieved context, scored 1–5 by a judge model. A true claim can still be ungrounded when the context does not support it. |
-| **Groundedness Pro** | Preview pass/fail evaluator using Azure AI Content Safety; no separate judge-model deployment is required. |
-| **Relevance** | Whether the response addresses the query. |
-| **Retrieval** | How effectively the system retrieves relevant information. |
-| **Document Retrieval** | Retrieval accuracy against ground-truth relevant documents. |
-| **Response Completeness** | Preview measure of whether critical ground-truth information is missing. |
+| **Retrieval** | Did the search bring back useful, relevant documents (and put the best ones near the top)? |
+| **Document Retrieval** | The same, but scored against a known list of "these are the correct documents" (a facit). |
 
-### Groundedness versus correctness
+### Did it answer properly from them? (the answer step)
 
-- **Groundedness:** Is the answer supported by this context?
-- **Correctness:** Is the answer actually right?
-- **Relevance:** Does the answer address the question?
+| Evaluator | In plain words |
+|---|---|
+| **Groundedness** | Is the answer actually backed up by the documents it was given? Scored **1–5** by a judge model. |
+| **Groundedness Pro** | Same question, but a simple **pass/fail** (uses Content Safety, no judge model needed). Preview. |
+| **Relevance** | Does the answer actually address the question asked? |
+| **Response Completeness** | Did the answer include all the important points, or leave something out? Preview. |
 
-A response can be relevant but ungrounded, grounded but incomplete, or grounded in an incorrect source.
+### The one distinction people mix up
+
+Three different questions:
+
+- **Groundedness** → "Is it supported by *these documents*?"
+- **Relevance** → "Does it answer *the question*?"
+- **Correctness** → "Is it *actually true* in the real world?"
+
+They don't always agree. An answer can be:
+- **relevant but ungrounded** (on-topic, but not backed by the documents),
+- **grounded but incomplete** (true to the docs, but missing key points),
+- **grounded in a wrong source** (faithfully repeats a document that happens to be incorrect).
+
+> Key point: **Groundedness only checks "does the document support this?" — not whether the document itself is right.**
 
 ## 15. Fairness and safety evaluators
 
