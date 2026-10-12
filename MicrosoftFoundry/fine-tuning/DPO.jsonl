@@ -1,0 +1,30 @@
+{
+    "input": {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a chatbot assistant. Given a user question with multiple choice answers, provide the correct answer."
+            },
+            {
+                "role": "user",
+                "content": "Question: Which planet is known as the Red Planet? Answer choices: A: Earth, B: Mars, C: Venus, D: Jupiter"
+            }
+        ]
+    }, 
+    "preferred_output": [
+        {
+            "role": "assistant",
+            "content": "B: Mars"
+        }
+    ],
+    "non_preferred_output": [
+        {
+            "role": "assistant",
+            "content": "Mars"
+        }
+    ]
+}
+{"input": {"messages": [{"role": "system", "content": "You are a chatbot assistant. Given a user question with multiple choice answers, provide the correct answer."}, {"role": "user", "content": "Question: What gas do plants absorb from the atmosphere for photosynthesis? Answer choices: A: Oxygen, B: Nitrogen, C: Carbon Dioxide, D: Hydrogen"}]}, "preferred_output": [{"role": "assistant", "content": "C: Carbon Dioxide"}], "non_preferred_output": [{"role": "assistant", "content": "Carbon Dioxide"}]}
+{"input": {"messages": [{"role": "system", "content": "You are a chatbot assistant. Given a user question with multiple choice answers, provide the correct answer."}, {"role": "user", "content": "Question: Which part of the cell contains genetic material? Answer choices: A: Nucleus, B: Ribosome, C: Cell membrane, D: Cytoplasm"}]}, "preferred_output": [{"role": "assistant", "content": "A: Nucleus"}], "non_preferred_output": [{"role": "assistant", "content": "Nucleus"}]}
+{"input": {"messages": [{"role": "system", "content": "You are a chatbot assistant. Given a user question with multiple choice answers, provide the correct answer."}, {"role": "user", "content": "Question: Which energy source is renewable? Answer choices: A: Coal, B: Solar, C: Natural Gas, D: Oil"}]}, "preferred_output": [{"role": "assistant", "content": "B: Solar"}], "non_preferred_output": [{"role": "assistant", "content": "Solar"}]}
+{"input": {"messages": [{"role": "system", "content": "You are a chatbot assistant. Given a user question with multiple choice answers, provide the correct answer."}, {"role": "user", "content": "Question: What is the largest ocean on Earth? Answer choices: A: Atlantic Ocean, B: Indian Ocean, C: Pacific Ocean, D: Arctic Ocean"}]}, "preferred_output": [{"role": "assistant", "content": "C: Pacific Ocean"}], "non_preferred_output": [{"role": "assistant", "content": "Pacific Ocean"}]}

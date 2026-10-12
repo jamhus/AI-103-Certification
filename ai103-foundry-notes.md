@@ -1,6 +1,6 @@
-# Microsoft Foundry Study Guide: Guardrails, Agents, Evaluations, and Model Deployments
+# Microsoft Foundry Study Guide: Guardrails, Agents, Evaluations, Model Deployments, and Fine-Tuning
 
-_Last updated: 9 October 2026_
+_Last updated: 12 October 2026_
 
 > This guide uses the current **Microsoft Foundry** terminology. Some older material still says **Azure AI Foundry**.
 
@@ -468,9 +468,100 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 
 **Quota = your allowance (max you may deploy/consume). Standard TPM quota and Provisioned PTU quota are separate buckets.**
 
-# Part V: High-value summary
+# Part V: Fine-tuning
 
-## 23. Facts to remember
+Fine-tuning adapts a pretrained model to a specific task, domain, style, or behaviour using specialized training data.
+
+## 23. Supervised Fine-Tuning (SFT)
+
+SFT trains a model on labelled examples in JSONL format. Each example contains a prompt and the desired assistant response, and can also include a system message.
+
+```text
+System message + user prompt + desired response
+```
+
+**Best suited for:**
+- specific formats, styles, and tones;
+- domain-specific behaviour;
+- improving instruction following.
+
+SFT is usually the recommended starting point when high-quality labelled examples are available.
+
+## 24. Reinforcement Fine-Tuning (RFT)
+
+In RFT, the model generates responses and a grader scores them. Training updates the model to produce responses that achieve higher scores.
+
+The grader can be an LLM, a rule-based evaluator, custom code, or a combination of multiple graders.
+
+```text
+Prompt -> model response -> grader score -> model improvement
+```
+
+**Best suited for:**
+- complex reasoning and problem-solving;
+- tasks with objective checks or clear scoring criteria;
+- cases where ideal labelled responses are difficult to produce.
+
+RFT requires a reliable grader because the model learns to optimize what the grader rewards.
+
+## 25. Direct Preference Optimization (DPO)
+
+DPO trains a model with two responses to the same prompt: one preferred response and one non-preferred response.
+
+```text
+Prompt -> preferred response + non-preferred response
+```
+
+**Best suited for:**
+- tasks without one clearly correct answer;
+- improving tone, style, helpfulness, or response quality;
+- preference data collected from reviews, comparisons, or logs.
+
+DPO can be applied to a supported base model or an SFT-tuned model.
+
+## 26. Function Calling Fine-Tuning (FFT)
+
+FFT is supervised fine-tuning with tool-calling examples. Training data includes tool definitions and examples of the tool calls and arguments the model should produce.
+
+```text
+User prompt + tool definitions -> expected tool call and arguments
+```
+
+**Best suited for:**
+- improving tool selection;
+- producing more accurate and consistent function arguments;
+- reducing reliance on long tool descriptions in every prompt.
+
+The application still executes the function. Fine-tuning improves the model's ability to select and format the call.
+
+## 27. Vision Fine-Tuning (VFT)
+
+VFT extends supervised fine-tuning with image inputs. Training examples use the chat-completions format and include images with prompts and desired assistant responses.
+
+```text
+Image + user prompt -> desired assistant response
+```
+
+**Best suited for:**
+- domain-specific image understanding;
+- visual classification or inspection;
+- consistent descriptions or decisions based on images.
+
+Images can be referenced by accessible URLs or included as base64 data URIs. Model and region support must be checked before use.
+
+## 28. Quick comparison
+
+| Method | Training signal | Best fit |
+|---|---|---|
+| **SFT** | Desired responses | Format, style, domain behaviour, and instruction following |
+| **RFT** | Grader scores | Reasoning and objectively measurable problem-solving |
+| **DPO** | Preferred versus rejected responses | Subjective quality and preference alignment |
+| **FFT** | Expected tool calls and arguments | Tool selection and function-call accuracy |
+| **VFT** | Images with desired responses | Domain-specific visual understanding |
+
+# Part VI: High-value summary
+
+## 29. Facts to remember
 
 1. Guardrail control = **risk + intervention point + action**.
 2. Models normally protect **input and output**.
@@ -486,7 +577,7 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 12. Deployment names combine **processing scope** with **capacity/billing**.
 13. Start with Global Standard unless residency, reserved throughput, or batch processing requires another type.
 
-## 24. Recommended study order
+## 30. Recommended study order
 
 1. Guardrail concepts and intervention points.
 2. Default, inherited, and overridden policies.
@@ -510,3 +601,8 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 - [Evaluate AI agents](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/evaluate-agent)
 - [Run evaluations in the Foundry portal](https://learn.microsoft.com/en-us/azure/foundry/how-to/evaluate-generative-ai-app)
 - [Deployment types for Microsoft Foundry Models](https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/deployment-types)
+- [Supervised fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning)
+- [Reinforcement fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reinforcement-fine-tuning)
+- [Direct Preference Optimization](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-direct-preference-optimization)
+- [Function calling fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-functions)
+- [Vision fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-vision)

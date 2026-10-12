@@ -1,0 +1,18 @@
+{"messages": [
+    {
+        "role": "system",
+        "content": "You are a helpful AI assistant specialized in answering cloud computing questions."
+    }, 
+    {
+        "role": "user",
+        "content": "What is Azure Blob Storage?"
+    },
+    {
+        "role": "assistant",
+        "content": "Azure Blob Storage is Microsoft's object storage service for storing large amounts of unstructured data such as images, videos, documents, and backups."
+    }
+]}
+{"messages": [{"role": "system", "content": "You are a helpful AI assistant specialized in answering cloud computing questions."}, {"role": "user", "content": "What is serverless computing?"}, {"role": "assistant", "content": "Serverless computing is a cloud execution model where developers run code without managing servers. The cloud provider automatically handles infrastructure, scaling, and availability."}]}
+{"messages": [{"role": "system", "content": "You are a helpful AI assistant specialized in answering cloud computing questions."}, {"role": "user", "content": "What is the purpose of Azure AI Search?"}, {"role": "assistant", "content": "Azure AI Search is a cloud search service that allows developers to build powerful search experiences over structured and unstructured data using indexing, ranking, and AI enrichment."}]}
+{"messages": [{"role": "system", "content": "You are a helpful AI assistant specialized in answering cloud computing questions."}, {"role": "user", "content": "What is vector search?"}, {"role": "assistant", "content": "Vector search finds similar items by comparing numerical embeddings instead of exact keyword matches. It is commonly used in semantic search and retrieval-augmented generation systems."}]}
+{"messages": [{"role": "system", "content": "You are a helpful AI assistant specialized in answering cloud computing questions."}, {"role": "user", "content": "What is MLflow used for?"}, {"role": "assistant", "content": "MLflow is an open-source platform used to manage the machine learning lifecycle, including experiment tracking, model packaging, model registry, and deployment."}]}
