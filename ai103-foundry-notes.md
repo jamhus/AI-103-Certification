@@ -559,9 +559,193 @@ Images can be referenced by accessible URLs or included as base64 data URIs. Mod
 | **FFT** | Expected tool calls and arguments | Tool selection and function-call accuracy |
 | **VFT** | Images with desired responses | Domain-specific visual understanding |
 
-# Part VI: High-value summary
+---
 
-## 29. Facts to remember
+# Part VI: Responsible AI
+
+## 29. The six Microsoft Responsible AI principles
+
+Responsible AI (RAI) is the governance layer *around* everything else in this guide. Guardrails and evaluations are two concrete tools you use to satisfy it, but RAI is broader: it covers how you design, build, ship, and operate a system.
+
+| Principle | In plain words | Where it shows up in Foundry |
+|---|---|---|
+| **Fairness** | Treat people equitably; avoid biased or discriminatory outcomes. | `Hate and Unfairness` evaluator; custom decision-fairness tests (§15). |
+| **Reliability & Safety** | Behave as intended, even on edge/adversarial input; fail safely. | Guardrails, content filters, Prompt Shields, evaluations, tracing. |
+| **Privacy & Security** | Protect personal and sensitive data; secure the system. | PII controls, data-residency via deployment type (§18–22), least-privilege identity. |
+| **Inclusiveness** | Work for people of all abilities and backgrounds. | Accessibility review, diverse test data, multilingual/edge-case evaluation. |
+| **Transparency** | People can understand how and why the system behaves. | Tracing/observability, model cards, documented limitations, disclosure to users. |
+| **Accountability** | Humans remain responsible; there is oversight and recourse. | Human-in-the-loop approvals, audit logs, impact assessments, rollback paths. |
+
+### How RAI connects to the rest of this guide
+
+```text
+Responsible AI principles (why + governance)
+  -> Impact assessment            (identify harms before building)
+  -> Guardrails / Content Safety  (block harm at runtime)        <- Part I
+  -> Evaluations                  (measure harm/quality)         <- Part III
+  -> Deterministic controls       (limits, approvals, schemas)   <- Section 6
+  -> Monitoring + audit           (detect drift, keep records)   <- Sections 9, 17
+```
+
+### Exam-relevant facts
+
+- Microsoft's RAI framework lists **six principles**; two of them (**Transparency**, **Accountability**) are "overarching" and apply to all the others.
+- **Content Safety** is the classifier service behind many guardrails and safety evaluators; it is a *tool* that serves the Reliability & Safety and Fairness principles, not the whole of RAI.
+- A **Responsible AI Impact Assessment** is done **before** development to identify intended uses, stakeholders, and potential harms.
+- Guardrails ≠ RAI and evaluations ≠ RAI; they are **implementations** of RAI principles. Governance, documentation, and human accountability are also required.
+- RAI is **not** solved by the model's built-in alignment alone; it needs system-level design, testing, and operations.
+
+---
+
+# Part VII: Foundry SDK clients — which client does what
+
+A frequent point of confusion is the difference between `AIProjectClient`, the client returned by `get_openai_client()`, and a standalone `AzureOpenAI` client. They overlap but serve different layers.
+
+## 30. The three clients
+
+| Client | Import | What it talks to | Primary purpose |
+|---|---|---|---|
+| **`AIProjectClient`** | `from azure.ai.projects import AIProjectClient` | The **Foundry project** control plane | Manage project resources: agents (`.agents`), connections (`.connections`), datasets, indexes, evaluations, deployments. This is the **management/orchestration** client. |
+| **OpenAI client via project** | `project_client.get_openai_client()` | The project's **model inference** endpoint (OpenAI-compatible) | Run inference: `.responses`, `.chat.completions`, `.conversations`, `.embeddings`. Pre-wired with the project endpoint and credential. **Data plane.** |
+| **`AzureOpenAI`** | `from openai import AzureOpenAI` | An **Azure OpenAI** resource/endpoint directly | Same inference surface (`.responses`, `.chat.completions`, …) but you configure `azure_endpoint`, `api_version`, and auth yourself. Used when you talk to Azure OpenAI **without** going through a Foundry project. |
+
+### The key relationships
+
+- `AIProjectClient` is the **entry point**. From it you get the inference client with `get_openai_client()`, so you don't hard-code the model endpoint or re-do auth.
+- The object returned by `get_openai_client()` **is an OpenAI-style client** (same methods as the `openai` package). It is effectively a project-scoped `AzureOpenAI`.
+- `AzureOpenAI` (the standalone `openai` SDK class) is the **lower-level** option: no project concept, no `.agents`, no `.connections` — just raw model calls against an Azure OpenAI endpoint.
+- Plain **`OpenAI`** (from `openai`) points at OpenAI.com, not Azure. In Foundry work you normally use the project client or `AzureOpenAI`, not `OpenAI`.
+
+```text
+AIProjectClient            # control plane: agents, connections, eval, data
+   └── get_openai_client() # data plane: inference, OpenAI-compatible
+         ≈ AzureOpenAI     # same methods, but project-wired for you
+```
+
+### Which to pick
+
+- Need to **create/version agents, manage connections, run evaluations** → `AIProjectClient`.
+- Need to **run model/agent inference inside a Foundry project** → `project_client.get_openai_client()`.
+- Need to **call an Azure OpenAI endpoint with no project** → `AzureOpenAI`.
+
+---
+
+# Part VIII: Inference APIs — responses, conversations, chat.completions, agents.create_version
+
+These four calls look similar but sit at different layers. Understanding how they **combine** is the point.
+
+## 31. The four calls
+
+| Call | Layer | What it does |
+|---|---|---|
+| **`chat.completions.create(...)`** | Stateless inference | The classic Chat Completions API. You send the full message list every time; the server keeps **no** state. `.parse(...)` is the structured-output variant that validates the reply against a schema/Pydantic model. |
+| **`responses.create(...)`** | Stateless or stateful inference | The newer **Responses API**. Simpler input (`input=`, `instructions=`), supports tools, streaming, and can attach to a server-side `conversation`. Preferred for new Foundry work. |
+| **`conversations.create(...)`** | Server-side state | Creates a **conversation object** that stores turn history on the server. You then pass its `id` to `responses.create(conversation=...)` instead of resending history. |
+| **`agents.create_version(...)`** | Control plane (definition) | Creates/updates a **durable agent version** (model + instructions + tools + policy) via `AIProjectClient.agents`. It does **not** run inference — it defines the agent you later invoke. |
+
+## 32. How they differ and combine
+
+### chat.completions vs responses
+
+- **chat.completions**: you manage history yourself (resend every message). `.parse` gives typed/structured output.
+- **responses**: newer, cleaner input shape, native tools + streaming, and optional server-side conversation state. For Foundry, prefer **responses** unless you specifically need chat.completions compatibility.
+
+### Where conversations fit
+
+`conversations.create()` is **not** an inference call. It returns a state container. Combine it with responses:
+
+```python
+conversation = openai_client.conversations.create()
+openai_client.responses.create(
+    conversation=conversation.id,   # server remembers prior turns
+    input=user_input,
+    stream=True,
+)
+```
+
+### Where agents.create_version fits
+
+`agents.create_version` defines the agent once (control plane). You then **invoke** that agent through the data plane — `responses.create` with an `agent_reference` — optionally inside a conversation:
+
+```python
+# 1. Define the agent (control plane, once)
+agent = project_client.agents.create_version(
+    agent_name="MCP-Integrated-Agent",
+    definition=PromptAgentDefinition(
+        model=model_deployment_name,
+        instructions="You are a helpful AI Assistant with tools integration.",
+        tools=[mcp_tool],
+    ),
+)
+
+# 2. Keep per-user state (data plane)
+conversation = openai_client.conversations.create()
+
+# 3. Invoke the agent version in that conversation (data plane)
+openai_client.responses.create(
+    conversation=conversation.id,
+    extra_body={"agent": {"name": agent.name, "type": "agent_reference"}},
+    input=user_input,
+    stream=True,
+)
+```
+
+### One-line mental model
+
+```text
+agents.create_version   = define the agent      (control plane, durable)
+conversations.create    = remember the session  (data plane, state)
+responses.create        = run a turn            (data plane, execution)
+chat.completions.create = run a stateless turn  (data plane, no server state)
+       .parse           = same, but typed/structured output
+```
+
+- **Differ:** control plane (define) vs data plane (run); stateless vs stateful.
+- **Combine:** `create_version` → (reference by) `responses.create` → (state from) `conversations.create`.
+
+---
+
+# Part IX: A2A anatomy
+
+**Agent-to-Agent (A2A)** is an open protocol that lets one agent discover and call another over HTTP. A Foundry agent is wrapped in an A2A **server** so other agents (or clients) can invoke it in a standard way. The server in this repo (`MicrosoftFoundry/A2A/A2A_Container_Apps/A2A_Server/`) shows every part.
+
+## 33. The five building blocks
+
+| Part | Type / class | Role |
+|---|---|---|
+| **Skill** | `AgentSkill` | A single capability the agent advertises: `id`, `name`, `description`, `tags`, `examples`. One agent can list several skills. It's a **description** of what the agent can do, not the implementation. |
+| **Agent Card** | `AgentCard` | The agent's public "business card" at a well-known URL. Holds `name`, `description`, `url`, `version`, input/output modes, `capabilities` (e.g. streaming), and the list of `skills`. Other agents **read the card to discover** this agent. |
+| **Executor** | `AgentExecutor` subclass | The **implementation**. Its `execute(context, event_queue)` runs the actual work — reads the user input from `RequestContext`, calls the underlying Foundry agent, and streams results back as events. Must also implement `cancel(...)`. This is where skills become real behaviour. |
+| **Request Handler** | `DefaultRequestHandler` | The **wiring** between the protocol and your executor. Takes the `agent_executor` plus a `task_store` (e.g. `InMemoryTaskStore`) and manages the task lifecycle (receive request → run executor → track task state). |
+| **Server** | `A2AStarletteApplication` + `uvicorn` | The **HTTP app**. Combines the `agent_card` and the `http_handler` (the request handler), exposes the card and endpoints, and serves them (here on port 8080). |
+
+### How a request flows
+
+```text
+Caller reads the Agent Card (discovery)
+  -> HTTP request hits the A2A server (A2AStarletteApplication)
+  -> Request Handler (DefaultRequestHandler) creates/tracks a Task
+  -> Executor.execute(context, event_queue)
+        - context.get_user_input()        # the query
+        - invoke underlying Foundry agent # responses.create stream
+        - enqueue TaskArtifactUpdateEvent # stream chunks back
+  -> Handler emits TaskStatusUpdateEvent(state=completed, final=True)
+  -> Response streamed to the caller
+```
+
+### Exam-relevant facts
+
+- **Agent Card = discovery/metadata; Executor = behaviour.** Don't confuse "what it says it can do" (skill/card) with "what it actually does" (executor).
+- A **skill** is declarative (advertised on the card); the **executor** is where that skill is implemented.
+- The **request handler needs a task store** because A2A models work as **tasks** with lifecycle states (e.g. `completed`) and streamed artifacts/status events.
+- `capabilities=AgentCapabilities(streaming=True)` on the card tells callers the agent can stream — the executor then yields `TaskArtifactUpdateEvent`s.
+- The underlying Foundry agent is invoked inside `execute` using the data-plane pattern from Part VIII (`responses.create` with an `agent_reference` + a conversation).
+
+---
+
+# Part X: High-value summary
+
+## 34. Facts to remember
 
 1. Guardrail control = **risk + intervention point + action**.
 2. Models normally protect **input and output**.
@@ -576,8 +760,12 @@ Images can be referenced by accessible URLs or included as base64 data URIs. Mod
 11. Evaluate both the final agent outcome and its tool-use process.
 12. Deployment names combine **processing scope** with **capacity/billing**.
 13. Start with Global Standard unless residency, reserved throughput, or batch processing requires another type.
+14. Responsible AI has **six principles**; **Transparency** and **Accountability** are overarching. Guardrails and evaluations are *implementations* of RAI, not RAI itself.
+15. `AIProjectClient` = **control plane** (agents, connections, eval); `get_openai_client()` = **data plane** inference; `AzureOpenAI` = project-less direct inference.
+16. `agents.create_version` **defines** an agent (durable); `responses.create` **runs** a turn; `conversations.create` **holds** state; `chat.completions.create` is stateless (`.parse` = typed output).
+17. In A2A, the **Agent Card** (with its **Skills**) advertises/discovers the agent; the **Executor** implements behaviour; the **Request Handler** + task store manage the task; the **Server** serves it over HTTP.
 
-## 30. Recommended study order
+## 35. Recommended study order
 
 1. Guardrail concepts and intervention points.
 2. Default, inherited, and overridden policies.
@@ -586,6 +774,10 @@ Images can be referenced by accessible URLs or included as base64 data URIs. Mod
 5. Groundedness, relevance, retrieval, coherence, and fluency.
 6. Agent task and tool-use evaluators.
 7. Global, Data Zone, geography, Standard, Provisioned, and Batch deployments.
+8. Responsible AI principles and how guardrails/evaluations implement them.
+9. Foundry SDK clients: `AIProjectClient` vs `get_openai_client()` vs `AzureOpenAI`.
+10. Inference APIs: responses, conversations, chat.completions/.parse, agents.create_version.
+11. A2A anatomy: skill, agent card, executor, request handler, server.
 
 ---
 
@@ -606,9 +798,12 @@ Images can be referenced by accessible URLs or included as base64 data URIs. Mod
 - [Direct Preference Optimization](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-direct-preference-optimization)
 - [Function calling fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-functions)
 - [Vision fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-vision)
-
-
-
-## topics to add: 
-  - responsible AI 
-  - 
+- [Responsible AI principles (Microsoft)](https://www.microsoft.com/en-us/ai/responsible-ai)
+- [Responsible use of AI overview](https://learn.microsoft.com/en-us/azure/machine-learning/concept-responsible-ai)
+- [Azure AI Content Safety overview](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview)
+- [AIProjectClient (azure-ai-projects) reference](https://learn.microsoft.com/en-us/python/api/overview/azure/ai-projects-readme)
+- [Get an OpenAI client from a Foundry project](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/develop/sdk-overview)
+- [Azure OpenAI with the OpenAI Python SDK](https://learn.microsoft.com/en-us/azure/ai-services/openai/supported-languages)
+- [Responses API](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/responses)
+- [Structured outputs (chat.completions parse)](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/structured-outputs)
+- [Agent-to-Agent (A2A) protocol](https://a2aproject.github.io/A2A/)
