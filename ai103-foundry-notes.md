@@ -606,3 +606,9 @@ Images can be referenced by accessible URLs or included as base64 data URIs. Mod
 - [Direct Preference Optimization](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-direct-preference-optimization)
 - [Function calling fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-functions)
 - [Vision fine-tuning](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/fine-tuning-vision)
+
+
+
+## topics to add: 
+  - responsible AI 
+  - 
