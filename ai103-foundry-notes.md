@@ -1,6 +1,6 @@
 # Microsoft Foundry Study Guide: Guardrails, Agents, Evaluations, Model Deployments, and Fine-Tuning
 
-_Last updated: 12 October 2026_
+_Last updated: 20 October 2026_
 
 > This guide uses the current **Microsoft Foundry** terminology. Some older material still says **Azure AI Foundry**.
 
@@ -743,128 +743,167 @@ Caller reads the Agent Card (discovery)
 
 ---
 
-## 33a. Content Understanding and Document Intelligence
+# Part X: Document extraction — Document Intelligence and Content Understanding
 
-**Purpose:** these services are used when you need to turn raw documents, PDFs, scans, forms, and images into structured, machine-readable information. They are especially useful for invoice extraction, contracts, receipts, forms, layout analysis, tables, and document understanding at scale.
+Two Azure services turn documents (and, for Content Understanding, other modalities) into structured data. Both follow the **same async poller pattern** and both offer **prebuilt** and **custom** options.
 
-### Content Understanding
+## 34. The two services and their prebuilt analyzers
 
-**Azure AI Content Understanding** is oriented around **analysis workflows**: you define what kind of understanding you want, and the service extracts patterns from the document or media. It is useful when you want to understand a document with a declared structure or business scenario instead of writing custom OCR + extraction logic from scratch.
+| Service | SDK / client | What it does | Modalities |
+|---|---|---|---|
+| **Document Intelligence** | `azure-ai-documentintelligence` → `DocumentIntelligenceClient` | OCR plus **structured field extraction** from documents (key-value pairs, tables, selection marks). | Documents and images. |
+| **Content Understanding** | `azure-ai-contentunderstanding` → `ContentUnderstandingClient` | Newer **multimodal** extraction and understanding; can also generate fields with a backing model. | Documents, images, audio, and video. |
 
-### Prebuilt analyzers
+### Prebuilt vs custom
 
-A **prebuilt analyzer** is a ready-made extraction template for common cases. Examples include layout analysis, read extraction, forms, receipts, invoices, and other document-type patterns. These save time and are typically the best starting point when your scenario matches a common business format.
+- **Prebuilt** = ready to use, **no training required**. You just pass the analyzer/model id.
+  - Common ids: `prebuilt-read` (raw text/OCR), `prebuilt-layout` (text + **tables + structure**), `prebuilt-invoice`, `prebuilt-receipt`, `prebuilt-idDocument`, `prebuilt-businessCard`, `prebuilt-tax.*`.
+  - `prebuilt-read` → just the words. `prebuilt-layout` → words **plus** document structure. Domain analyzers (`invoice`, `receipt`, …) → **named fields** like total, vendor, date.
+- **Custom** = you **train on your own labelled documents** and call it by a custom id.
+  - Document Intelligence: `model_id="doc-intel-custom"`.
+  - Content Understanding: a custom `analyzer_id`.
 
-- Good for: standard documents, forms, receipts, contracts, invoices.
-- Benefits: faster time-to-value, less custom model tuning, predictable result structure.
-- When to customize: when the document format is highly specific or business rules are unique.
+### The two call shapes
 
-### Poller and result
+```python
+# Document Intelligence — begin_analyze_document(model_id=, body=AnalyzeDocumentRequest(...))
+poller = client.begin_analyze_document(
+    model_id="prebuilt-invoice",
+    body=AnalyzeDocumentRequest(bytes_source=document_bytes),  # or url_source=
+)
 
-Many document-processing calls are **asynchronous**. Instead of waiting for a single immediate response, the client returns a **poller** that tracks progress until the job finishes.
-
-```text
-Submit document -> service starts analysis job
-  -> poller checks status until complete
-  -> final result object contains extracted data
+# Content Understanding — begin_analyze(analyzer_id=, inputs=[AnalysisInput(...)])
+poller = client.begin_analyze(
+    analyzer_id="prebuilt-read",
+    inputs=[AnalysisInput(url=file_url)],  # or data=bytes, name=, mime_type=
+)
 ```
 
-The final **result** usually includes things like:
+## 35. The poller and the result
 
-- pages and document layout;
-- extracted text and tables;
-- key-value pairs;
-- field confidence scores;
-- document metadata;
-- structured output for downstream app logic.
+Both `begin_analyze_document` and `begin_analyze` are **long-running operations (LROs)**. They don't return the answer directly:
 
-This is important in exam questions: a document analysis task often uses a **poller** because the service works asynchronously, and the result object is what you consume in code once the job is complete.
+```text
+begin_analyze(...)         # kicks off the job, returns immediately
+      -> poller            # a handle to the running operation
+poller.result()            # BLOCKS until finished, returns the typed result
+```
 
-### Document Intelligence
+- The **poller** lets you wait (`.result()`), or check status, without re-sending the request. It is Azure's standard async pattern for work that takes time.
+- The **result** is a typed object:
+  - Document Intelligence → `AnalyzeResult` with `result.documents`, each having `doc_type`, `confidence`, and `fields` (each field has `type`, `content`/`value_string`, and `confidence`).
+  - Content Understanding → `AnalysisResult` with the extracted content/fields.
+- **Confidence scores** on fields let you route low-confidence extractions to human review.
 
-**Azure AI Document Intelligence** is the classic OCR + document extraction capability. It handles:
+### Exam-relevant facts
 
-- text extraction from PDFs and scanned documents;
-- table detection;
-- forms and field extraction;
-- receipt/invoice processing;
-- document layout and structure recognition.
-
-In practical terms, Document Intelligence gives you a set of **prebuilt models** and custom models to extract business data from documents. Like Content Understanding, the workflow usually involves a customer request, an asynchronous analysis job, and a final result object with extracted values.
+- **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named business fields.
+- Analysis is **asynchronous**: `begin_*` returns a **poller**, `poller.result()` returns the typed **result**.
+- **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** (also audio/video) and is the newer service.
+- Fields carry **confidence** — use it for human-in-the-loop review thresholds.
 
 ---
 
-## 33b. Azure AI Search
+# Part XI: Azure AI Search
 
-**Purpose:** Azure AI Search is the retrieval and ranking layer for enterprise search. It is used when you need to search across large sets of documents or content, enrich them with AI, and return the most relevant results to users or agents.
+## 36. What it is and the purpose it serves
 
-### How it works
-
-Azure AI Search performs the following flow:
+**Azure AI Search** is a **search-as-a-service**. You load your content into it once, and it serves fast queries over that content — keyword, filtered, vector, and semantic. It is the **retrieval engine** behind most RAG systems: the "R" that finds the right documents before a model answers (see §14).
 
 ```text
-Data source (Blob, SharePoint, SQL, Cosmos, etc.)
-  -> indexer reads and maps the content
-  -> skillset enriches the content with AI skills
-  -> index stores searchable fields and metadata
-  -> query engine answers full text, vector, semantic, or hybrid queries
+Your content (blobs, DBs, files)
+   -> ingested + AI-enriched
+   -> stored in a searchable INDEX
+   -> apps/LLMs query it for relevant results
 ```
 
-This means the service is not only a simple keyword search. It adds **AI enrichment** and **ranking** before results are returned.
+Purpose in one line: **make heterogeneous content searchable and retrievable**, so apps can find information and LLMs can be grounded on it.
 
-### Core components
+## 37. The components
 
-#### 1. Indexer
-An **indexer** connects to an external data source and pulls data into the search service. It is the ingestion mechanism. It can continuously or periodically refresh content from sources such as Azure Blob Storage, SharePoint, SQL, or Cosmos DB.
+| Component | In plain words |
+|---|---|
+| **Data source** | The connection to where your content lives (e.g. Blob Storage, SQL, Cosmos DB). |
+| **Indexer** | The **crawler/automation**. It pulls documents from the data source, runs them through the skillset, and pushes the results into the index — on a schedule or on demand. |
+| **Skillset** | The **AI-enrichment pipeline** applied *during indexing*: OCR, key-phrase extraction, entity recognition (persons/locations/organizations), **sentiment**, image analysis, embeddings, and **custom skills**. Turns raw content into extra searchable fields. |
+| **Index** | The **searchable store + schema**. Defines fields and their attributes, and holds the enriched documents you actually query. |
 
-#### 2. Skillset
-A **skillset** applies enrichment steps to content before it is indexed. Common examples include:
+### Field attributes (on the index)
 
-- OCR and document extraction;
-- key phrase extraction;
-- entity recognition;
-- language detection;
-- image analysis;
-- custom AI enrichment.
+Each field is configured with what it's allowed to do:
 
-A skillset helps convert unstructured content into searchable and semantically richer content.
+- **searchable** — can be full-text searched.
+- **retrievable** — can be returned in results.
+- **filterable** — can be used in `$filter` (e.g. `sentiment eq 'positive'`).
+- **sortable / facetable** — can order results / power facet navigation.
 
-#### 3. Index
-The **index** is the searchable schema. It defines which fields are available, how they are tokenized, whether they are filterable, sortable, facetable, or vectorizable. This is the actual structure used for retrieval.
+```text
+Data source -> Indexer -> Skillset (enrich) -> Index (query this)
+```
 
-#### 4. Search service / queries
-The service supports multiple query styles:
+## 38. Query types and the semantic reranker
 
-- **Full text search:** keyword-based search over content.
-- **Vector search:** semantic similarity using embeddings.
-- **Hybrid search:** combines keyword relevance and vector similarity.
-- **Semantic search:** uses ranking and understanding of query intent, not just literal matches.
-- **Filter/facet/search-by-field:** useful for structured use cases such as date, category, or department.
+### First: keyword vs semantic, and what BM25 is
 
-### Semantic ranking and reranker score
+- **Keyword search (lexical)** matches the **actual words** in the query against the words in the index. If the words don't overlap, it won't match — "car" will not find a document that only says "automobile".
+- **BM25** (Best Matching 25) is the **ranking algorithm** that scores those keyword matches. It's the classic, maths-based formula behind the default **`@search.score`**. Roughly, a document scores higher when:
+  - the query term appears **more often** in it (term frequency), but with **diminishing returns**;
+  - the term is **rare across the whole index** (a distinctive word counts more than a common one);
+  - the document is **not unusually long** (length normalisation stops long docs winning just by size).
+  - BM25 understands **nothing about meaning** — only word statistics. It's fast and the default for simple/full queries.
+- **Semantic** means ranking by **meaning/intent**, not exact words. Azure AI Search runs a **language model** over the top keyword results to understand what the query and passages *mean*, so "cheap places to stay near the beach" can surface a hotel passage that never uses those exact words. It also powers captions and extractive answers.
 
-**Semantic search** is important because it does more than literal keyword matching. It tries to understand user intent and rank the document results by meaning and relevance.
+> **One-liner:** BM25 = keyword relevance by word statistics (the default `@search.score`). Semantic = a language model re-ranks for meaning (adds `@search.reranker_score`).
 
-The **semantic reranker score** is the score assigned after semantic ranking. It reflects how well the document matches the user intent after the reranking step. In other words, a document with a high reranker score is considered more relevant semantically, even if it does not contain the exact keyword sequence in the same form.
+### The query types
 
-This is one of the most common exam points: Azure AI Search is a retrieval system, and semantic reranking improves relevance by considering conceptual similarity and intent, not just exact string matching.
+Set with `query_type` on the search call (or `"queryType"` in the REST body).
 
-### Why Azure AI Search matters for AI apps
+| Query type | What it does |
+|---|---|
+| **Simple** (default) | Basic keyword search with light operators. Ranked by **BM25**. Good default. |
+| **Full** (Lucene) | Full **Lucene syntax**: field-scoped (`title:"Dubai Brochure.pdf"`), wildcards (`hote*`), fuzzy (`Dubia~`), boolean. Still keyword/BM25, just richer syntax. |
+| **Semantic** | Takes the top BM25 results and **re-ranks them by meaning** with a language model; can return captions/answers. Requires a **semantic configuration**. |
+| **Vector / hybrid** | Embeddings **similarity** search (meaning via vectors), optionally combined with keyword (hybrid) for best recall + precision. |
 
-Azure AI Search bridges raw enterprise data and AI applications:
+Filters (OData `$filter`) are **independent** of query type — they work on `filterable` fields with any mode:
 
-- it provides **retrieval** for RAG patterns;
-- it can enrich content with AI skills;
-- it supports **vector + keyword** retrieval strategies;
-- it improves answer relevance with semantic ranking.
+```python
+results = search_client.search(
+    search_text="travel",
+    query_type="semantic",
+    semantic_configuration_name=semantic_configuration_name,
+    filter="sentiment eq 'positive' and locations/any(o: o eq 'London')",
+)
+```
 
-For a Foundry or agent-based application, this is often the component that turns documents into a searchable knowledge layer.
+### The semantic reranker score
+
+When `query_type="semantic"`, a second **deep-learning reranker** reorders the first-stage results by semantic relevance to the query:
+
+- It returns **`@search.reranker_score`**, on a **fixed 0–4 scale** (higher = more relevant).
+- This is **different** from the default **`@search.score`** (BM25 keyword relevance), which is **not** 0–4: BM25 is an **unbounded** positive number (0 and up) that is only meaningful *relative to other results in the same query* — you can't compare it across queries.
+- Two-stage model: keyword/vector retrieval finds candidates → semantic reranker reorders the top of that list.
+
+```python
+for result in results:
+    print("Reranker score:", result['@search.reranker_score'])  # 0–4, semantic
+```
+
+### Exam-relevant facts
+
+- **Indexer = ingestion automation; Skillset = AI enrichment; Index = what you query.** Don't mix them up.
+- A field must be **filterable** to use it in `$filter`, **retrievable** to return it, **searchable** to full-text search it.
+- **Simple vs Full**: Full enables Lucene syntax (fields, wildcards `*`, fuzzy `~`, boolean).
+- **BM25** is the default **keyword** ranking algorithm (word statistics: term frequency + rarity + length), producing **`@search.score`**. It ignores meaning. The score is **unbounded** (not 0–4) and only comparable within one query's results.
+- **Semantic** ranks by **meaning** with a language model; it needs a semantic configuration and adds **`@search.reranker_score`** on a **fixed 0–4 scale**, separate from the unbounded BM25 **`@search.score`**.
+- AI Search is the **retrieval** layer for RAG; groundedness/retrieval evaluators (§14) measure how well that retrieval feeds the model.
 
 ---
 
-# Part X: High-value summary
+# Part XII: High-value summary
 
-## 34. Facts to remember
+## 39. Facts to remember
 
 1. Guardrail control = **risk + intervention point + action**.
 2. Models normally protect **input and output**.
@@ -883,8 +922,12 @@ For a Foundry or agent-based application, this is often the component that turns
 15. `AIProjectClient` = **control plane** (agents, connections, eval); `get_openai_client()` = **data plane** inference; `AzureOpenAI` = project-less direct inference.
 16. `agents.create_version` **defines** an agent (durable); `responses.create` **runs** a turn; `conversations.create` **holds** state; `chat.completions.create` is stateless (`.parse` = typed output).
 17. In A2A, the **Agent Card** (with its **Skills**) advertises/discovers the agent; the **Executor** implements behaviour; the **Request Handler** + task store manage the task; the **Server** serves it over HTTP.
+18. Document analysis is **async**: `begin_*` returns a **poller**, `poller.result()` returns the typed result. **Prebuilt** needs no training; **custom** is trained on your documents.
+19. `prebuilt-read` = OCR text only; `prebuilt-layout` = adds tables/structure; domain analyzers (`invoice`, `receipt`) = named fields. **Content Understanding** is multimodal (adds audio/video); **Document Intelligence** is document/image focused.
+20. In Azure AI Search: **Indexer** = ingestion automation, **Skillset** = AI enrichment, **Index** = what you query. A field needs **filterable** for `$filter`, **retrievable** to return, **searchable** to full-text search.
+21. Search query types: **simple** (default), **full** (Lucene: fields, `*`, `~`, boolean), **semantic** (reranks for meaning), **vector/hybrid**. Semantic adds **`@search.reranker_score`** (0–4), separate from BM25 **`@search.score`**.
 
-## 35. Recommended study order
+## 40. Recommended study order
 
 1. Guardrail concepts and intervention points.
 2. Default, inherited, and overridden policies.
@@ -897,6 +940,8 @@ For a Foundry or agent-based application, this is often the component that turns
 9. Foundry SDK clients: `AIProjectClient` vs `get_openai_client()` vs `AzureOpenAI`.
 10. Inference APIs: responses, conversations, chat.completions/.parse, agents.create_version.
 11. A2A anatomy: skill, agent card, executor, request handler, server.
+12. Document Intelligence vs Content Understanding: prebuilt/custom, poller and result.
+13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score.
 
 ---
 
@@ -926,3 +971,12 @@ For a Foundry or agent-based application, this is often the component that turns
 - [Responses API](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/responses)
 - [Structured outputs (chat.completions parse)](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/structured-outputs)
 - [Agent-to-Agent (A2A) protocol](https://a2aproject.github.io/A2A/)
+- [Document Intelligence overview](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/overview)
+- [Document Intelligence prebuilt models](https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/model-overview)
+- [Azure AI Content Understanding overview](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/overview)
+- [Long-running operations (poller pattern) in the Azure SDK](https://learn.microsoft.com/en-us/azure/developer/python/sdk/lro)
+- [What is Azure AI Search?](https://learn.microsoft.com/en-us/azure/search/search-what-is-azure-search)
+- [Indexers in Azure AI Search](https://learn.microsoft.com/en-us/azure/search/search-indexer-overview)
+- [Skillset concepts (AI enrichment)](https://learn.microsoft.com/en-us/azure/search/cognitive-search-working-with-skillsets)
+- [Query types and composition](https://learn.microsoft.com/en-us/azure/search/search-query-overview)
+- [Semantic ranking and reranker score](https://learn.microsoft.com/en-us/azure/search/semantic-search-overview)
