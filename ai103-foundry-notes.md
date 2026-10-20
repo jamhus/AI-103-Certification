@@ -743,6 +743,125 @@ Caller reads the Agent Card (discovery)
 
 ---
 
+## 33a. Content Understanding and Document Intelligence
+
+**Purpose:** these services are used when you need to turn raw documents, PDFs, scans, forms, and images into structured, machine-readable information. They are especially useful for invoice extraction, contracts, receipts, forms, layout analysis, tables, and document understanding at scale.
+
+### Content Understanding
+
+**Azure AI Content Understanding** is oriented around **analysis workflows**: you define what kind of understanding you want, and the service extracts patterns from the document or media. It is useful when you want to understand a document with a declared structure or business scenario instead of writing custom OCR + extraction logic from scratch.
+
+### Prebuilt analyzers
+
+A **prebuilt analyzer** is a ready-made extraction template for common cases. Examples include layout analysis, read extraction, forms, receipts, invoices, and other document-type patterns. These save time and are typically the best starting point when your scenario matches a common business format.
+
+- Good for: standard documents, forms, receipts, contracts, invoices.
+- Benefits: faster time-to-value, less custom model tuning, predictable result structure.
+- When to customize: when the document format is highly specific or business rules are unique.
+
+### Poller and result
+
+Many document-processing calls are **asynchronous**. Instead of waiting for a single immediate response, the client returns a **poller** that tracks progress until the job finishes.
+
+```text
+Submit document -> service starts analysis job
+  -> poller checks status until complete
+  -> final result object contains extracted data
+```
+
+The final **result** usually includes things like:
+
+- pages and document layout;
+- extracted text and tables;
+- key-value pairs;
+- field confidence scores;
+- document metadata;
+- structured output for downstream app logic.
+
+This is important in exam questions: a document analysis task often uses a **poller** because the service works asynchronously, and the result object is what you consume in code once the job is complete.
+
+### Document Intelligence
+
+**Azure AI Document Intelligence** is the classic OCR + document extraction capability. It handles:
+
+- text extraction from PDFs and scanned documents;
+- table detection;
+- forms and field extraction;
+- receipt/invoice processing;
+- document layout and structure recognition.
+
+In practical terms, Document Intelligence gives you a set of **prebuilt models** and custom models to extract business data from documents. Like Content Understanding, the workflow usually involves a customer request, an asynchronous analysis job, and a final result object with extracted values.
+
+---
+
+## 33b. Azure AI Search
+
+**Purpose:** Azure AI Search is the retrieval and ranking layer for enterprise search. It is used when you need to search across large sets of documents or content, enrich them with AI, and return the most relevant results to users or agents.
+
+### How it works
+
+Azure AI Search performs the following flow:
+
+```text
+Data source (Blob, SharePoint, SQL, Cosmos, etc.)
+  -> indexer reads and maps the content
+  -> skillset enriches the content with AI skills
+  -> index stores searchable fields and metadata
+  -> query engine answers full text, vector, semantic, or hybrid queries
+```
+
+This means the service is not only a simple keyword search. It adds **AI enrichment** and **ranking** before results are returned.
+
+### Core components
+
+#### 1. Indexer
+An **indexer** connects to an external data source and pulls data into the search service. It is the ingestion mechanism. It can continuously or periodically refresh content from sources such as Azure Blob Storage, SharePoint, SQL, or Cosmos DB.
+
+#### 2. Skillset
+A **skillset** applies enrichment steps to content before it is indexed. Common examples include:
+
+- OCR and document extraction;
+- key phrase extraction;
+- entity recognition;
+- language detection;
+- image analysis;
+- custom AI enrichment.
+
+A skillset helps convert unstructured content into searchable and semantically richer content.
+
+#### 3. Index
+The **index** is the searchable schema. It defines which fields are available, how they are tokenized, whether they are filterable, sortable, facetable, or vectorizable. This is the actual structure used for retrieval.
+
+#### 4. Search service / queries
+The service supports multiple query styles:
+
+- **Full text search:** keyword-based search over content.
+- **Vector search:** semantic similarity using embeddings.
+- **Hybrid search:** combines keyword relevance and vector similarity.
+- **Semantic search:** uses ranking and understanding of query intent, not just literal matches.
+- **Filter/facet/search-by-field:** useful for structured use cases such as date, category, or department.
+
+### Semantic ranking and reranker score
+
+**Semantic search** is important because it does more than literal keyword matching. It tries to understand user intent and rank the document results by meaning and relevance.
+
+The **semantic reranker score** is the score assigned after semantic ranking. It reflects how well the document matches the user intent after the reranking step. In other words, a document with a high reranker score is considered more relevant semantically, even if it does not contain the exact keyword sequence in the same form.
+
+This is one of the most common exam points: Azure AI Search is a retrieval system, and semantic reranking improves relevance by considering conceptual similarity and intent, not just exact string matching.
+
+### Why Azure AI Search matters for AI apps
+
+Azure AI Search bridges raw enterprise data and AI applications:
+
+- it provides **retrieval** for RAG patterns;
+- it can enrich content with AI skills;
+- it supports **vector + keyword** retrieval strategies;
+- it improves answer relevance with semantic ranking.
+
+For a Foundry or agent-based application, this is often the component that turns documents into a searchable knowledge layer.
+
+---
+
 # Part X: High-value summary
 
 ## 34. Facts to remember
