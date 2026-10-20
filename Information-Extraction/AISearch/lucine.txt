@@ -1,0 +1,41 @@
+// results with hotel everywhere with london in locations or beach in key phrases
+{
+    "search": "hotel",
+    "queryType": "full",
+    "filter": "locations/any(l: l eq 'London') or keyPhrases/any(k: k eq 'beach')"
+}
+
+// match all combinations of the letters (fuzzy search)
+{
+    "search": "Duiab~",
+    "queryType": "full"
+}
+
+// match all tailings for the word, hotel , hoter, hotef etc (wildcard search)
+{
+    "search": "hote*",
+    "queryType": "full"
+}
+
+// specific column 
+{
+    "search": "title:\"Dubai Brochure.pdf\"",
+    "queryType": "full"
+}
+
+{
+  "search": "*",
+  "filter": "sentiment eq 'positive'"
+}
+
+{
+  "search": "Dubai",
+  "queryType": "full",
+  "filter": "sentiment eq 'negative'"
+}
+
+{
+  "search": "travel",
+  "queryType": "full",
+  "filter": "sentiment eq 'positive' and locations/any(o: o eq 'London')"
+}
