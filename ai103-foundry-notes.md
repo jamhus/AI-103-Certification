@@ -599,34 +599,37 @@ Responsible AI principles (why + governance)
 
 # Part VII: Foundry SDK clients — which client does what
 
-A frequent point of confusion is the difference between `AIProjectClient`, the client returned by `get_openai_client()`, and a standalone `AzureOpenAI` client. They overlap but serve different layers.
+Three clients get confused: `AIProjectClient`, `get_openai_client()`, and `AzureOpenAI`. The split is simple: **one manages the project, two run inference.**
 
 ## 30. The three clients
 
-| Client | Import | What it talks to | Primary purpose |
-|---|---|---|---|
-| **`AIProjectClient`** | `from azure.ai.projects import AIProjectClient` | The **Foundry project** control plane | Manage project resources: agents (`.agents`), connections (`.connections`), datasets, indexes, evaluations, deployments. This is the **management/orchestration** client. |
-| **OpenAI client via project** | `project_client.get_openai_client()` | The project's **model inference** endpoint (OpenAI-compatible) | Run inference: `.responses`, `.chat.completions`, `.conversations`, `.embeddings`. Pre-wired with the project endpoint and credential. **Data plane.** |
-| **`AzureOpenAI`** | `from openai import AzureOpenAI` | An **Azure OpenAI** resource/endpoint directly | Same inference surface (`.responses`, `.chat.completions`, …) but you configure `azure_endpoint`, `api_version`, and auth yourself. Used when you talk to Azure OpenAI **without** going through a Foundry project. |
+| Client | Plane | Use it to |
+|---|---|---|
+| **`AIProjectClient`** | Control (manage) | Manage project resources: `.agents`, `.connections`, datasets, indexes, evaluations, deployments. |
+| **`project_client.get_openai_client()`** | Data (run) | Run inference **inside** a Foundry project — endpoint + auth already wired for you. |
+| **`AzureOpenAI`** | Data (run) | Run inference against an Azure OpenAI endpoint **with no project** — you set `azure_endpoint`, `api_version`, and auth yourself. |
 
-### The key relationships
+Imports: `from azure.ai.projects import AIProjectClient` · `from openai import AzureOpenAI`.
 
-- `AIProjectClient` is the **entry point**. From it you get the inference client with `get_openai_client()`, so you don't hard-code the model endpoint or re-do auth.
-- The object returned by `get_openai_client()` **is an OpenAI-style client** (same methods as the `openai` package). It is effectively a project-scoped `AzureOpenAI`.
-- `AzureOpenAI` (the standalone `openai` SDK class) is the **lower-level** option: no project concept, no `.agents`, no `.connections` — just raw model calls against an Azure OpenAI endpoint.
-- Plain **`OpenAI`** (from `openai`) points at OpenAI.com, not Azure. In Foundry work you normally use the project client or `AzureOpenAI`, not `OpenAI`.
+### Mental model
 
 ```text
 AIProjectClient            # control plane: agents, connections, eval, data
-   └── get_openai_client() # data plane: inference, OpenAI-compatible
-         ≈ AzureOpenAI     # same methods, but project-wired for you
+   └── get_openai_client() # data plane: inference (OpenAI-compatible)
+         ≈ AzureOpenAI     # same inference methods, but project-wired for you
 ```
+
+- `AIProjectClient` is the **entry point**; `get_openai_client()` hands you a project-scoped OpenAI client, so you never hard-code the model endpoint or redo auth.
+- `AzureOpenAI` is the same inference surface (`.responses`, `.chat.completions`, `.embeddings`, …) **without** the project layer — no `.agents`, no `.connections`.
+- Plain **`OpenAI`** points at OpenAI.com, not Azure — not used for Foundry work.
 
 ### Which to pick
 
-- Need to **create/version agents, manage connections, run evaluations** → `AIProjectClient`.
-- Need to **run model/agent inference inside a Foundry project** → `project_client.get_openai_client()`.
-- Need to **call an Azure OpenAI endpoint with no project** → `AzureOpenAI`.
+| Goal | Client |
+|---|---|
+| Create/version agents, manage connections, run evaluations | `AIProjectClient` |
+| Run inference **inside** a Foundry project | `project_client.get_openai_client()` |
+| Call an Azure OpenAI endpoint **with no project** | `AzureOpenAI` |
 
 ---
 
@@ -798,6 +801,35 @@ poller.result()            # BLOCKS until finished, returns the typed result
 ### Exam-relevant facts
 
 - **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named business fields.
+
+---
+
+# Part XI: Red teaming
+
+**Red teaming = proactively attacking your own AI** to find safety holes **before** real users (or attackers) do. It is adversarial *testing*, not a runtime block.
+
+## 36. AI Red Teaming Agent
+
+Foundry's **AI Red Teaming Agent** automates adversarial probing. It is built on **PyRIT** (Python Risk Identification Tool, Microsoft's open-source red-teaming framework) and runs as part of the evaluation tooling.
+
+- **When:** before deployment and after material changes — a safety gate, alongside evaluations.
+- **What it does:** sends many adversarial prompts to your target, then uses Content Safety to judge whether each response was harmful.
+- **Target:** a model deployment, a callback function, or an agent.
+
+### What gets measured and controlled
+
+- **Risk categories probed:** **hate & unfairness, violence, sexual, self-harm** (same content-safety categories as guardrails and safety evaluators).
+- **Attack strategies**, applied at rising complexity:
+  - **Baseline** — the plain harmful prompt, no obfuscation.
+  - **Easy / Moderate / Difficult** — transformations that try to slip past filters, e.g. Base64, ROT13, Morse, Caesar cipher, Unicode confusables, character flipping, tense changes.
+- **Key metric — Attack Success Rate (ASR):** the percentage of attacks that produced undesired/harmful output. **Lower is better.** Reported overall and broken down **by risk category and by attack complexity**.
+
+### Exam-relevant facts
+
+- Red teaming is **proactive testing** (find weaknesses); **guardrails are the runtime defence** that blocks them — they complement each other, they are not the same thing.
+- The AI Red Teaming Agent is built on **PyRIT**.
+- The headline number is **Attack Success Rate (ASR)** — lower means safer.
+- Results are a **scorecard** segmented by risk category and attack complexity, so you can see *which* harms slipped through and *how sophisticated* an attack had to be.
 - Analysis is **asynchronous**: `begin_*` returns a **poller**, `poller.result()` returns the typed **result**.
 - **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** (also audio/video) and is the newer service.
 - Fields carry **confidence** — use it for human-in-the-loop review thresholds.
@@ -980,3 +1012,4 @@ for result in results:
 - [Skillset concepts (AI enrichment)](https://learn.microsoft.com/en-us/azure/search/cognitive-search-working-with-skillsets)
 - [Query types and composition](https://learn.microsoft.com/en-us/azure/search/search-query-overview)
 - [Semantic ranking and reranker score](https://learn.microsoft.com/en-us/azure/search/semantic-search-overview)
+
