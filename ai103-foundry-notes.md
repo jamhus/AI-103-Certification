@@ -801,35 +801,6 @@ poller.result()            # BLOCKS until finished, returns the typed result
 ### Exam-relevant facts
 
 - **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named business fields.
-
----
-
-# Part XI: Red teaming
-
-**Red teaming = proactively attacking your own AI** to find safety holes **before** real users (or attackers) do. It is adversarial *testing*, not a runtime block.
-
-## 36. AI Red Teaming Agent
-
-Foundry's **AI Red Teaming Agent** automates adversarial probing. It is built on **PyRIT** (Python Risk Identification Tool, Microsoft's open-source red-teaming framework) and runs as part of the evaluation tooling.
-
-- **When:** before deployment and after material changes — a safety gate, alongside evaluations.
-- **What it does:** sends many adversarial prompts to your target, then uses Content Safety to judge whether each response was harmful.
-- **Target:** a model deployment, a callback function, or an agent.
-
-### What gets measured and controlled
-
-- **Risk categories probed:** **hate & unfairness, violence, sexual, self-harm** (same content-safety categories as guardrails and safety evaluators).
-- **Attack strategies**, applied at rising complexity:
-  - **Baseline** — the plain harmful prompt, no obfuscation.
-  - **Easy / Moderate / Difficult** — transformations that try to slip past filters, e.g. Base64, ROT13, Morse, Caesar cipher, Unicode confusables, character flipping, tense changes.
-- **Key metric — Attack Success Rate (ASR):** the percentage of attacks that produced undesired/harmful output. **Lower is better.** Reported overall and broken down **by risk category and by attack complexity**.
-
-### Exam-relevant facts
-
-- Red teaming is **proactive testing** (find weaknesses); **guardrails are the runtime defence** that blocks them — they complement each other, they are not the same thing.
-- The AI Red Teaming Agent is built on **PyRIT**.
-- The headline number is **Attack Success Rate (ASR)** — lower means safer.
-- Results are a **scorecard** segmented by risk category and attack complexity, so you can see *which* harms slipped through and *how sophisticated* an attack had to be.
 - Analysis is **asynchronous**: `begin_*` returns a **poller**, `poller.result()` returns the typed **result**.
 - **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** (also audio/video) and is the newer service.
 - Fields carry **confidence** — use it for human-in-the-loop review thresholds.
@@ -933,9 +904,74 @@ for result in results:
 
 ---
 
-# Part XII: High-value summary
+# Part XII: Red teaming
 
-## 39. Facts to remember
+**Red teaming = you attack your own AI on purpose** to find safety problems **before** real users or real attackers do. Think of it like a fire drill: you start a (safe) fire to check the alarms actually go off. It is *testing*, not a live block.
+
+## 39. AI Red Teaming Agent
+
+Foundry's **AI Red Teaming Agent** does the attacking for you automatically. Under the hood it uses **PyRIT** (Python Risk Identification Tool — Microsoft's free open-source red-teaming tool).
+
+- **When to run it:** before you deploy, and again after big changes. It's a safety check, like evaluations.
+- **What it does:** it sends lots of "bad" prompts to your AI, then uses Content Safety to grade whether the answer that came back was actually harmful.
+- **What you can point it at:** a deployed model, a function, or an agent.
+
+### The filters it tests (and what each one catches)
+
+A **filter** is the AI's safety gate: it is meant to spot and stop harmful content. Red teaming checks whether each of these common filters actually holds up under attack:
+
+| Filter (risk category) | What it is meant to catch |
+|---|---|
+| **Hate & unfairness** | Hateful, insulting, discriminatory, or biased content about people or groups (race, gender, religion, etc.). |
+| **Violence** | Content that describes, threatens, or encourages physical harm, weapons, or gore. |
+| **Sexual** | Explicit or inappropriate sexual content. |
+| **Self-harm** | Content about hurting oneself or suicide, or encouraging it. |
+
+These are the same four content-safety categories used by guardrails and the safety evaluators. A separate filter, **Prompt Shields**, catches *jailbreak* / prompt-injection attempts — tricks that try to make the AI ignore its own rules.
+
+### How hard it tries (attack difficulty)
+
+It first asks the bad question plainly, then **disguises** it so the filter might not recognise the harmful words. Harder levels use sneakier disguises.
+
+| Level | What it means |
+|---|---|
+| **Baseline** | The plain harmful question, no tricks. |
+| **Easy → Moderate → Difficult** | The same question hidden with one or more of the techniques below. More/stronger disguises = harder level. |
+
+### The disguise techniques (attack strategies)
+
+These are the tricks the agent uses to try to smuggle a harmful request past the filter. The idea is always the same: **the meaning stays harmful, but the surface text looks innocent**, so a filter that only scans for bad words might miss it.
+
+| Technique | What it does | Tiny example of "hello" |
+|---|---|---|
+| **Base64** | Encodes the text into a letters/numbers string; the model can decode it but the filter sees gibberish. | `aGVsbG8=` |
+| **Morse code** | Replaces letters with dots and dashes. | `.... . .-.. .-.. ---` |
+| **ROT13 / Caesar** | Shifts every letter a fixed number of steps in the alphabet. | `uryyb` (shift 13) |
+| **Character flip / swap** | Reverses or scrambles the letters. | `olleh` |
+| **Unicode / leetspeak** | Swaps letters for look-alike symbols or numbers. | `h3ll0` |
+| **Jailbreak prompt** | Doesn't encode text — instead *talks the model out of its rules* ("ignore your instructions", "pretend you are an AI with no limits", role-play tricks). This is the **prompt-injection** family that **Prompt Shields** is meant to stop. |
+
+> **Key idea:** Base64, Morse, ROT13, flipping, leetspeak = **hide the words**. Jailbreak = **argue the model into breaking its rules**. Red teaming throws all of these at your AI to see which ones get through.
+
+### The one score that matters — Attack Success Rate (ASR)
+
+- ASR = **out of all the attacks, how many got a harmful answer through.**
+- **Lower = safer.** (0% means nothing got past the filters.)
+- You get it as a **scorecard**: broken down by filter (harm category) and by difficulty, so you can see *which* filter leaked and *how clever* the attack had to be.
+
+### Exam-relevant facts
+
+- Red teaming **finds** weaknesses (testing); **filters/guardrails block** them at runtime. Different jobs — don't mix them up.
+- The filters tested are **hate & unfairness, violence, sexual, self-harm**; **Prompt Shields** handles jailbreak / prompt injection.
+- The AI Red Teaming Agent runs on **PyRIT**.
+- The key metric is **Attack Success Rate (ASR)** — **lower is better**.
+- Two families of disguise: **encode the words** (Base64, Morse, ROT13, flipping, leetspeak) and **jailbreak** (argue the model out of its rules — the prompt-injection family **Prompt Shields** targets).
+
+---
+
+# Part XIII: High-value summary
+
+## 40. Facts to remember
 
 1. Guardrail control = **risk + intervention point + action**.
 2. Models normally protect **input and output**.
@@ -958,8 +994,9 @@ for result in results:
 19. `prebuilt-read` = OCR text only; `prebuilt-layout` = adds tables/structure; domain analyzers (`invoice`, `receipt`) = named fields. **Content Understanding** is multimodal (adds audio/video); **Document Intelligence** is document/image focused.
 20. In Azure AI Search: **Indexer** = ingestion automation, **Skillset** = AI enrichment, **Index** = what you query. A field needs **filterable** for `$filter`, **retrievable** to return, **searchable** to full-text search.
 21. Search query types: **simple** (default), **full** (Lucene: fields, `*`, `~`, boolean), **semantic** (reranks for meaning), **vector/hybrid**. Semantic adds **`@search.reranker_score`** (0–4), separate from BM25 **`@search.score`**.
+22. **Red teaming** = proactive attack testing (built on **PyRIT**); it probes the **hate/unfairness, violence, sexual, self-harm** filters at rising difficulty and reports **Attack Success Rate (ASR)** — lower is safer.
 
-## 40. Recommended study order
+## 41. Recommended study order
 
 1. Guardrail concepts and intervention points.
 2. Default, inherited, and overridden policies.
@@ -974,6 +1011,7 @@ for result in results:
 11. A2A anatomy: skill, agent card, executor, request handler, server.
 12. Document Intelligence vs Content Understanding: prebuilt/custom, poller and result.
 13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score.
+14. Red teaming: the AI Red Teaming Agent (PyRIT), the filters it tests, attack difficulty levels, and the ASR score.
 
 ---
 
