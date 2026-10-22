@@ -284,6 +284,13 @@ They don't always agree. An answer can be:
 
 > Key point: **Groundedness only checks "does the document support this?" — not whether the document itself is right.**
 
+### RAG vs multimodal RAG
+
+- **RAG (Retrieval-Augmented Generation):** retrieve relevant **text** (usually via Azure AI Search), feed it to the model so the answer is grounded in your documents. Text in, text out.
+- **Multimodal RAG:** the grounding content isn't only text — it also includes **images, charts, diagrams, scanned pages, tables, video/audio frames**. It uses **multimodal embeddings** (image + text) and parsing services (**Document Intelligence / Content Understanding**) so the system can retrieve *and reason over visuals*, with a multimodal model (e.g. GPT-4o) producing the answer.
+
+> One line: **RAG grounds on text; multimodal RAG grounds on text + images/visual content.**
+
 ## 15. Fairness and safety evaluators
 
 Foundry commonly represents fairness-related generative-AI evaluation through **Hate and Unfairness**, rather than one universal fairness score.
@@ -467,6 +474,23 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 ### Quota in one line
 
 **Quota = your allowance (max you may deploy/consume). Standard TPM quota and Provisioned PTU quota are separate buckets.**
+
+## 22c. Model version upgrade policy
+
+**Model version upgrade policy** controls what a deployment does when Azure releases a **new version of the same model** (e.g. a newer `gpt-4o` snapshot). You set it per deployment.
+
+| Policy | What it does |
+|---|---|
+| **`OnceNewDefaultVersionAvailable`** (default) | Auto-upgrades to the new version shortly after Azure makes it the default. |
+| **`OnceCurrentVersionExpired`** | Stays on the current version and only upgrades when that version is **retired/expired**. |
+| **`NoAutoUpgrade`** (pin / "None") | Never auto-upgrades. You stay on the exact version and upgrade **manually**. |
+
+**Why it matters:**
+
+- **Agents on that model:** if the deployment auto-upgrades, an agent built on it suddenly runs on a new model version — outputs and behaviour can shift, so **re-run your evaluations/regression tests** after an upgrade. Pinning (`NoAutoUpgrade`) gives stable, reproducible behaviour.
+- **Fine-tuning:** a fine-tuned model is tied to a **specific base-model version**, so it is effectively **pinned** — auto-upgrade doesn't silently swap the base. To move to a newer base version you generally **re-tune**.
+
+> One line: auto-upgrade = always current but can change behaviour; pin = stable but you own the upgrade. Fine-tunes are pinned to their base version.
 
 # Part V: Fine-tuning
 
@@ -995,6 +1019,8 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 20. In Azure AI Search: **Indexer** = ingestion automation, **Skillset** = AI enrichment, **Index** = what you query. A field needs **filterable** for `$filter`, **retrievable** to return, **searchable** to full-text search.
 21. Search query types: **simple** (default), **full** (Lucene: fields, `*`, `~`, boolean), **semantic** (reranks for meaning), **vector/hybrid**. Semantic adds **`@search.reranker_score`** (0–4), separate from BM25 **`@search.score`**.
 22. **Red teaming** = proactive attack testing (built on **PyRIT**); it probes the **hate/unfairness, violence, sexual, self-harm** filters at rising difficulty and reports **Attack Success Rate (ASR)** — lower is safer.
+23. **Version upgrade policy**: `OnceNewDefaultVersionAvailable` (auto, default), `OnceCurrentVersionExpired` (upgrade only at retirement), `NoAutoUpgrade` (pinned). Auto-upgrade can change agent behaviour (re-evaluate); fine-tunes are pinned to their base version.
+24. **RAG** grounds on **text**; **multimodal RAG** grounds on **text + images/visual content** (multimodal embeddings + Document Intelligence/Content Understanding + a multimodal model).
 
 ## 41. Recommended study order
 
@@ -1012,6 +1038,7 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 12. Document Intelligence vs Content Understanding: prebuilt/custom, poller and result.
 13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score.
 14. Red teaming: the AI Red Teaming Agent (PyRIT), the filters it tests, attack difficulty levels, and the ASR score.
+15. Model version upgrade policy and its effect on agents and fine-tunes; RAG vs multimodal RAG.
 
 ---
 
@@ -1050,4 +1077,3 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 - [Skillset concepts (AI enrichment)](https://learn.microsoft.com/en-us/azure/search/cognitive-search-working-with-skillsets)
 - [Query types and composition](https://learn.microsoft.com/en-us/azure/search/search-query-overview)
 - [Semantic ranking and reranker score](https://learn.microsoft.com/en-us/azure/search/semantic-search-overview)
-
