@@ -926,6 +926,26 @@ for result in results:
 - **Semantic** ranks by **meaning** with a language model; it needs a semantic configuration and adds **`@search.reranker_score`** on a **fixed 0–4 scale**, separate from the unbounded BM25 **`@search.score`**.
 - AI Search is the **retrieval** layer for RAG; groundedness/retrieval evaluators (§14) measure how well that retrieval feeds the model.
 
+## 38b. Foundry IQ — RAG as a managed knowledge base
+
+**Foundry IQ** is a managed **knowledge base** in Foundry that packages the whole RAG retrieval pipeline so you don't have to wire it up yourself. It is **built on Azure AI Search** (§36–38) and turns retrieval + grounding into a single thing an agent can call.
+
+```text
+Knowledge sources (Blob, SharePoint, …)
+   -> Foundry IQ knowledge base  (built on Azure AI Search: indexing, vector + semantic retrieval)
+   -> exposed as an MCP tool  (knowledge_base_retrieve)
+   -> Foundry agent calls it to ground answers with citations
+```
+
+**How it builds on AI Search and RAG:**
+
+- **It is AI Search underneath.** Foundry IQ uses Azure AI Search for indexing and for vector + semantic retrieval — but you configure a **knowledge base** instead of hand-building indexer, skillset, index, and query code.
+- **Multiple knowledge sources, one base.** You attach sources like **Blob Storage** (indexed into AI Search) and **SharePoint** (connected as a **remote source** — retrieved **without re-indexing**, respecting **Microsoft Purview** governance/compliance).
+- **Agentic retrieval.** Rather than one query, it can plan and decompose a complex question across sources, then return grounded passages **with source URLs** for citation.
+- **Consumed as a tool, not plumbing.** The knowledge base is surfaced to the agent through an **MCP tool** (`knowledge_base_retrieve`). The agent just calls the tool; Foundry IQ does the retrieval and hands back grounded results.
+
+> One line: **AI Search = the retrieval engine; Foundry IQ = a managed, multi-source RAG knowledge base built on that engine, handed to agents as an MCP tool.** It is the same RAG idea (§14) — find documents, then ground the answer — but packaged so you connect sources instead of building the pipeline.
+
 ---
 
 # Part XII: Red teaming
@@ -1021,6 +1041,7 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 22. **Red teaming** = proactive attack testing (built on **PyRIT**); it probes the **hate/unfairness, violence, sexual, self-harm** filters at rising difficulty and reports **Attack Success Rate (ASR)** — lower is safer.
 23. **Version upgrade policy**: `OnceNewDefaultVersionAvailable` (auto, default), `OnceCurrentVersionExpired` (upgrade only at retirement), `NoAutoUpgrade` (pinned). Auto-upgrade can change agent behaviour (re-evaluate); fine-tunes are pinned to their base version.
 24. **RAG** grounds on **text**; **multimodal RAG** grounds on **text + images/visual content** (multimodal embeddings + Document Intelligence/Content Understanding + a multimodal model).
+25. **Foundry IQ** = a managed, multi-source **RAG knowledge base built on Azure AI Search**; it connects sources (Blob, SharePoint-as-remote-source) and is handed to agents as an **MCP tool** (`knowledge_base_retrieve`) that returns grounded results with citations.
 
 ## 41. Recommended study order
 
@@ -1036,7 +1057,7 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 10. Inference APIs: responses, conversations, chat.completions/.parse, agents.create_version.
 11. A2A anatomy: skill, agent card, executor, request handler, server.
 12. Document Intelligence vs Content Understanding: prebuilt/custom, poller and result.
-13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score.
+13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score; and **Foundry IQ** as a managed RAG knowledge base built on it.
 14. Red teaming: the AI Red Teaming Agent (PyRIT), the filters it tests, attack difficulty levels, and the ASR score.
 15. Model version upgrade policy and its effect on agents and fine-tunes; RAG vs multimodal RAG.
 
