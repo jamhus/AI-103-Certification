@@ -811,12 +811,20 @@ Use a **multimodal model** (e.g. GPT-4o) or vision services to interpret images/
 
 ## 50. Content Understanding for vision
 
-**Azure Content Understanding** (a Foundry Tool) extracts structured **visual characteristics** from images and video with a defined **analyzer**:
+**Azure Content Understanding** (a Foundry Tool) extracts structured **visual characteristics** from images and video with a defined **analyzer** (a schema of the fields you want). It runs in two modes.
 
-- **Single-task mode:** one focused extraction.
-- **Pro mode:** richer, multi-aspect analysis pipelines for more complex understanding.
-- **Video analysis:** process and interpret video **segments**.
-- Produces clean, structured output you can feed to agents and RAG.
+| | **Standard mode** (single-task) | **Pro mode** |
+|---|---|---|
+| **What it does** | One analyzer does a **single-pass** extraction of your schema's fields from **one input** file. | **Multi-step reasoning** that can combine **multiple input files** and **reference data/knowledge** in one analysis. |
+| **Reasoning** | Direct field extraction, no cross-document inference. | Agentic, multi-step: reasons across inputs, links and **validates** against reference data, enriches results. |
+| **Inputs** | A single document/image/video. | Several related inputs analysed together. |
+| **Best for** | Straightforward, high-volume extraction (invoice fields, caption, classification). | Complex cases: compare/reconcile documents, cross-reference a knowledge source, decisions needing reasoning. |
+| **Cost/latency** | Cheaper, faster. | Higher cost/latency for the extra reasoning. |
+
+- **Video analysis:** process and interpret video **segments** in either mode.
+- Both produce clean, structured output you can feed to agents and RAG.
+
+> One line: **standard = one file, direct extraction; pro = multiple files + reference data with multi-step reasoning and validation.**
 
 ## 51. Responsible AI for visual content
 
