@@ -1,0 +1,141 @@
+CONTOSO LTD.
+
+INVOICE
+
+Contoso Headquarters
+123 456th St
+New York, NY, 10001
+
+INVOICE: INV-100
+
+INVOICE DATE: 11/15/2019
+
+DUE DATE: 12/15/2019
+
+CUSTOMER NAME: MICROSOFT CORPORATION
+
+SERVICE PERIOD: 10/14/2019 - 11/14/2019
+
+CUSTOMER ID: CID-12345
+
+Microsoft Corp
+123 Other St,
+Redmond WA, 98052
+
+BILL TO:
+Microsoft Finance
+123 Bill St,
+Redmond WA, 98052
+
+SHIP TO:
+Microsoft Delivery
+123 Ship St,
+Redmond WA, 98052
+
+SERVICE ADDRESS:
+Microsoft Services
+123 Service St,
+Redmond WA, 98052
+
+SALESPERSON
+
+P.O. NUMBER
+
+REQUISITIONER
+
+SHIPPED VIA
+
+F.O.B. POINT
+
+TERMS
+
+PO-3333
+
+DATE
+
+ITEM CODE
+
+DESCRIPTION
+
+QTY
+
+UM
+
+PRICE
+
+TAX
+
+AMOUNT
+
+3/4/2021
+
+A123
+
+Consulting Services
+
+2
+
+hours
+
+$30.00
+
+$6.00
+
+$60.00
+
+3/5/2021
+
+B456
+
+Document Fee
+
+3
+
+$10.00
+
+$3.00
+
+$30.00
+
+3/6/2021
+
+C789
+
+Printing Fee
+
+10
+
+pages
+
+$1.00
+
+$1.00
+
+$10.00
+
+SUBTOTAL
+
+$100.00
+
+SALES TAX
+
+$10.00
+
+TOTAL
+
+$110.00
+
+PREVIOUS UNPAID BALANCE
+
+$500.00
+
+AMOUNT DUE
+
+$610.00
+
+THANK YOU FOR YOUR BUSINESS!
+
+REMIT TO:
+Contoso Billing
+123 Remit St
+New York, NY, 10001
