@@ -1,10 +1,26 @@
-# Microsoft Foundry Study Guide: Guardrails, Agents, Evaluations, Model Deployments, and Fine-Tuning
+# Microsoft Foundry Study Guide for AI-103: Developing AI Apps and Agents on Azure
 
-_Last updated: 20 October 2026_
+_Last updated: 24 October 2026_
 
-> This guide uses the current **Microsoft Foundry** terminology. Some older material still says **Azure AI Foundry**.
+> Uses current **Microsoft Foundry** terminology (older material may say **Azure AI Foundry**). The structure follows the **AI-103** exam domains.
+
+## How this guide maps to the AI-103 exam
+
+| Exam domain (weight) | Covered in |
+|---|---|
+| **Plan and manage an Azure AI solution** (25–30%) | Parts I–III |
+| **Implement generative AI and agentic solutions** (30–35%) | Parts IV–VIII |
+| **Implement computer vision solutions** (10–15%) | Part IX |
+| **Implement text analysis solutions** (10–15%) | Parts X–XI |
+| **Implement information extraction solutions** (10–15%) | Parts XII–XIII |
+
+---
+
+# Part I: Foundations and model selection
 
 ## 1. The big picture
+
+A **model** generates a response. An **agent** wraps a model with instructions, conversation state, knowledge, tools, orchestration, identity, and monitoring. Agent safety must therefore cover not only prompts and answers, but also proposed tool calls and returned tool data.
 
 ```text
 User
@@ -17,350 +33,43 @@ User
   -> user
 ```
 
-A **model** generates a response. An **agent** wraps a model with instructions, conversation state, knowledge, tools, orchestration, identity, and monitoring. Agent safety must therefore cover not only prompts and answers, but also proposed tool calls and returned tool data.
+Everything else in this guide hangs off this picture: you **choose a model**, **deploy** it, **secure and monitor** it (Parts II–III), **build apps and agents** on it (Parts IV–VI), make it **responsible/safe** (Part VII), optionally **fine-tune** it (Part VIII), and add **vision, language, speech, and retrieval** capabilities (Parts IX–XIII).
 
----
+## 2. Choosing a model
 
-# Part I: Guardrails
+Foundry's model catalog spans several families. Pick by **task + modality + cost/latency**, not by brand.
 
-## 2. What is a guardrail?
-
-A **guardrail** is a named collection of **controls**. Each control defines:
-
-1. a **risk** to detect;
-2. one or more **intervention points** to inspect;
-3. the **action** taken when the risk is detected.
-
-Guardrails use safety classifiers, including Azure AI Content Safety capabilities. They are an extra runtime layer around the workload. They do not retrain the model and are not the same as system instructions or the model's built-in alignment.
-
-## 3. Model guardrails versus agent guardrails
-
-### Model guardrails
-
-A model deployment normally has two relevant intervention points:
-
-- **User input:** the prompt before inference.
-- **Output:** the model completion before it is returned.
-
-### Agent guardrails
-
-An agent can have up to four intervention points:
-
-- **User input:** the request before agent processing.
-- **Tool call:** the action and data the agent proposes to send to a tool. Agent-only and currently preview.
-- **Tool response:** content returned by a tool before the agent uses it. Agent-only and currently preview.
-- **Output:** the final answer before it reaches the user.
-
-Tool-call and tool-response moderation depends on support in the relevant agent and tool path. Do not assume every custom tool is automatically covered.
-
-## 4. Default behaviour
-
-### Default for a model deployment
-
-Foundry model deployments are assigned **Microsoft.DefaultV2** by default. This provides baseline filtering on supported model inputs and outputs.
-
-### Default for a Foundry agent
-
-The exact default depends on the agent type and configuration:
-
-- For agents covered by Agent Service guardrail inheritance, an agent without its own custom guardrail uses the underlying model deployment's guardrail.
-- If the agent has a custom guardrail, that agent policy governs risk detection in the agent flow and overrides the model policy for that flow.
-- A **hosted agent** has an optional `rai_config`. Microsoft documents that omitting it means the hosted agent runs without a platform content-safety guardrail. If `rai_config` exists but no policy name is supplied, `Microsoft.DefaultV2` is applied.
-
-So, “all agents use DefaultV2 by default” is too broad. Always check the agent type and attached RAI policy.
-
-## 5. What happens with custom guardrails?
-
-### Scenario A: Custom policy on the model, no custom policy on the agent
-
-For agent types that support inheritance, the agent inherits the model deployment's policy. Input and output filtering follows that policy. Tool-call and tool-response protection exists only where the policy and runtime support those intervention points.
-
-### Scenario B: Custom policy on both model and agent
-
-The **agent policy overrides the model policy for the agent flow**. The policies are not automatically merged.
-
-A stricter model policy therefore does not automatically fill gaps in a weaker agent policy. If the agent policy omits a control or intervention point, that part of the flow might not be examined by the omitted control.
-
-### Scenario C: Default model policy and custom agent policy
-
-The custom agent policy governs the agent flow. It should explicitly contain every required risk and intervention point.
-
-### Scenario D: Direct calls to the model outside the agent
-
-Direct calls still use the guardrail attached to the model deployment. An agent-level policy does not automatically protect unrelated direct model calls.
-
-### Practical rule
-
-Treat model and agent entry points as separate attack surfaces:
-
-- configure the model safely for direct use;
-- configure the agent for prompts, tool calls, tool responses, and final answers;
-- test both paths;
-- never assume the policies are merged.
-
-## 6. Annotate versus block
-
-### Action applicability (models versus agents)
-
-| Action | Models | Agents (Preview) |
-|---|---:|---:|
-| Annotate | ✅ | ❌ |
-| Annotate and block | ✅ | ✅ |
-
-Annotate is a model-only standalone action. Agents only support annotate and block.
-
-### Annotate
-
-**Annotate** detects and labels a risk but lets the content continue. The application can inspect or log the returned safety metadata and decide what to do.
-
-- Supported for model flows.
-- Not supported as a standalone agent-guardrail action in the current action-applicability documentation.
-- Useful for monitoring and application-controlled handling.
-- Unsafe content can continue unless application code acts on the annotation.
-
-### Annotate and block
-
-**Annotate and block** records the detection and stops the flow at that intervention point.
-
-- **Input blocked:** the request does not reach the model or agent.
-- **Model output blocked:** the generated completion is not normally returned.
-- **Tool call blocked:** the proposed action is not executed.
-- **Tool response blocked:** the unsafe or malicious tool result is not passed onward for normal agent use.
-- **Agent output blocked:** the final answer is not normally delivered.
-
-### Why agents need more than content filters
-
-An agent can affect external systems. For consequential tools, combine guardrails with deterministic controls:
-
-- allow-listed tools and destinations;
-- strict schemas and business validation;
-- least-privilege identity;
-- human confirmation before high-impact actions;
-- transaction limits and idempotency;
-- audit logs, traces, and rollback paths.
-
-A probabilistic content classifier should not be the only authorisation boundary around an action.
-
-## 7. Common guardrail controls
-
-Controls can include:
-
-- hate/unfairness, violence, sexual, and self-harm content filters;
-- Prompt Shields for direct and indirect prompt attacks;
-- protected-material detection;
-- custom blocklists;
-- groundedness-related checks where supported;
-- PII or sensitive-information controls where supported;
-- network-egress controls for hosted agents, currently preview.
-
-Availability varies by model, region, agent type, and preview status.
-
-## 8. Guardrails are not evaluations
-
-| Guardrails | Evaluations |
-|---|---|
-| Run in the live request or agent execution path | Run against datasets, traces, simulations, or production samples |
-| Intervene immediately | Measure behaviour and produce scores/results |
-| Can block content or actions | Do not normally stop a live request by themselves |
-| Protect runtime interactions | Help decide readiness and detect regression |
-
-Evaluation thresholds can become CI/CD release gates, but automation must enforce the gate.
-
----
-
-# Part II: Agent lifecycle
-
-## 9. Development and operational lifecycle
-
-1. **Define use case and risk**: task, users, data, autonomy, forbidden actions, success criteria, and approval points.
-2. **Choose agent type**: prompt, voice-based prompt, or hosted agent.
-3. **Choose and deploy the model**: balance quality, tools, latency, cost, capacity, and data-processing needs.
-4. **Create the agent**: configure instructions, model, tools, knowledge, identity, and session behaviour.
-5. **Add data and tools**: connect only what is required and apply least privilege.
-6. **Add guardrails and deterministic controls**: cover inputs, tools, outputs, schemas, approvals, and limits.
-7. **Test and trace**: use normal, edge, adversarial, and failure cases; inspect model and tool calls.
-8. **Evaluate**: measure quality, safety, retrieval, task outcome, and tool behaviour against repeatable tests.
-9. **Optimize hosted agents (preview)**: tune hosted-agent configuration and performance before publishing.
-10. **Version and publish**: save a known version and expose a stable integration.
-11. **Monitor production**: watch latency, errors, token usage, safety signals, tool failures, and quality drift.
-12. **Improve or roll back**: change model, instructions, tools, retrieval, or policy; then rerun regression tests.
-13. **Retire**: remove access, revoke connections/identities, preserve required audit evidence, and migrate users.
-
-## 10. Runtime lifecycle of one agent request
-
-```text
-Receive input
-  -> inspect input
-  -> load session/context
-  -> model plans or selects next step
-  -> optional tool call
-  -> inspect and authorise tool call
-  -> execute tool
-  -> inspect tool response
-  -> model continues with updated context
-  -> repeat until complete or stopped
-  -> inspect final output
-  -> return response and record telemetry
-```
-
-Possible end states include successful completion, blocked content, tool failure, timeout, cancellation, exceeded limits, refusal, or human escalation.
-
-## 11. Versions, sessions, and runs
-
-- **Agent definition/version:** durable configuration containing model, instructions, tools, and policy references.
-- **Session/conversation:** persistent context connecting multiple user turns.
-- **Run/response:** one execution in a session, potentially containing several model and tool steps.
-- **Trace:** observability record of calls, timings, dependencies, and errors.
-
-The definition provides behaviour, the session provides continuity, and the run performs the current task.
-
----
-
-# Part III: Evaluations
-
-## 12. What an evaluator measures
-
-An evaluator scores one dimension of quality, safety, retrieval, or agent behaviour. Some are deterministic; others use an LLM-as-judge or Azure AI Content Safety. Use several metrics because one score cannot represent overall correctness, usefulness, and safety.
-
-## 13. General quality evaluators
-
-**Coherence** and **Fluency** just check the writing itself (no reference needed):
-
-| Evaluator | In plain words |
-|---|---|
-| **Coherence** | Does the answer make sense and flow logically, without contradicting itself? |
-| **Fluency** | Is the language smooth and natural (grammar, wording)? |
-
-### Similarity, F1, BLEU/GLEU, ROUGE, METEOR — one idea, five flavours
-
-These all do **one thing**: compare the model's answer to a **reference answer** (a "correct" example you provide) and measure how much they match. They just match in different ways.
-
-Running example — the reference answer is **"The cat sat on the mat."**
-
-| Evaluator | What it looks at | On the example |
+| Model type | What it is | Choose it when |
 |---|---|---|
-| **Similarity** | The **meaning**, not the exact words (uses AI to judge). | "A feline rested on the rug" → different words, same meaning → **high**. (Similar ≠ factually true, just close to the reference.) |
-| **F1** | **Single words** that match — did you include the right words, without adding junk? | "The cat sat on the big red soft mat indoors" → right words present but lots of extra → **lower**. |
-| **BLEU / GLEU** | **Short word-sequences (phrases) in order.** Common for **translation**. | "on the mat" in order scores; "mat the on" scores less. |
-| **ROUGE** | **Coverage** — how much of the reference's content you captured. Common for **summaries**. | Did your summary include the key points from the source? |
-| **METEOR** | Same idea but **most forgiving** — accepts **synonyms** and different word order. | reference "big", answer "large" → METEOR still counts it; the stricter ones would miss it. |
+| **LLM (large language model)** | High-capability text model (e.g. GPT-4o, GPT-4.1). | Complex reasoning, broad knowledge, high-quality generation. |
+| **SLM (small language model)** | Smaller, cheaper, faster model (e.g. Phi family). | High volume, low latency, edge/cost-sensitive, narrow tasks; can be fine-tuned to punch above its size. |
+| **Reasoning model** | Optimised for multi-step logic (e.g. o-series). | Hard math, planning, tool-use chains where correctness beats speed/cost. |
+| **Multimodal model** | Accepts/produces more than text — images, audio (e.g. GPT-4o, GPT-image, Sora). | Vision understanding, image/video generation, audio-native interactions. |
+| **Code model** | Tuned for code generation/completion. | Code-heavy generation, refactoring, structured function calling. |
+| **Embedding model** | Turns text/images into vectors. | Vector/semantic search and RAG retrieval (not generation). |
+| **Foundry Tools / task models** | Managed task capabilities (Translator, Speech, Content Understanding, Document Intelligence, etc.). | Well-defined tasks where a purpose-built service beats prompting an LLM. |
 
-**Simplest takeaway:** Similarity = meaning. The other four = word matching against a reference, from strict (F1, BLEU) to generous (METEOR).
+**Selection rule of thumb:** start with the **smallest/cheapest model that meets quality**, measure with evaluations (Part VII), then move up only if needed. Match **modality** to the task, and prefer a **Foundry Tool** over a general LLM for a well-defined task (translation, OCR, transcription).
 
-## 14. RAG and grounding evaluators
+## 3. Choosing the right Foundry capability
 
-**First, what is RAG?** The system **searches for documents** and then the model **answers using them**. So there are two things to check: did it **find the right documents**, and did it **use them properly**?
-
-Think of it like an open-book exam: first you pick the right page, then you answer from what's on it.
-
-### Did it find the right documents? (the search step)
-
-| Evaluator | In plain words |
+| Task | Use |
 |---|---|
-| **Retrieval** | Did the search bring back useful, relevant documents (and put the best ones near the top)? |
-| **Document Retrieval** | The same, but scored against a known list of "these are the correct documents" (a facit). |
-
-### Did it answer properly from them? (the answer step)
-
-| Evaluator | In plain words |
-|---|---|
-| **Groundedness** | Is the answer actually backed up by the documents it was given? Scored **1–5** by a judge model. |
-| **Groundedness Pro** | Same question, but a simple **pass/fail** (uses Content Safety, no judge model needed). Preview. |
-| **Relevance** | Does the answer actually address the question asked? |
-| **Response Completeness** | Did the answer include all the important points, or leave something out? Preview. |
-
-### The one distinction people mix up
-
-Three different questions:
-
-- **Groundedness** → "Is it supported by *these documents*?"
-- **Relevance** → "Does it answer *the question*?"
-- **Correctness** → "Is it *actually true* in the real world?"
-
-They don't always agree. An answer can be:
-- **relevant but ungrounded** (on-topic, but not backed by the documents),
-- **grounded but incomplete** (true to the docs, but missing key points),
-- **grounded in a wrong source** (faithfully repeats a document that happens to be incorrect).
-
-> Key point: **Groundedness only checks "does the document support this?" — not whether the document itself is right.**
-
-### RAG vs multimodal RAG
-
-- **RAG (Retrieval-Augmented Generation):** retrieve relevant **text** (usually via Azure AI Search), feed it to the model so the answer is grounded in your documents. Text in, text out.
-- **Multimodal RAG:** the grounding content isn't only text — it also includes **images, charts, diagrams, scanned pages, tables, video/audio frames**. It uses **multimodal embeddings** (image + text) and parsing services (**Document Intelligence / Content Understanding**) so the system can retrieve *and reason over visuals*, with a multimodal model (e.g. GPT-4o) producing the answer.
-
-> One line: **RAG grounds on text; multimodal RAG grounds on text + images/visual content.**
-
-## 15. Fairness and safety evaluators
-
-Foundry commonly represents fairness-related generative-AI evaluation through **Hate and Unfairness**, rather than one universal fairness score.
-
-| Evaluator | Short explanation |
-|---|---|
-| **Hate and Unfairness** | Detects hateful, discriminatory, biased, or unfair generated content involving protected or vulnerable groups. |
-| **Violence** | Detects violent content and severity. |
-| **Sexual** | Detects sexual content and severity. |
-| **Self-harm** | Detects self-harm content and severity. |
-| **Protected Material** | Detects possible reproduction of protected text or code. |
-| **Indirect Attack / Prompt Injection** | Detects untrusted retrieved content attempting to manipulate the model or agent. |
-| **Code Vulnerability** | Assesses generated code for insecure patterns where available. |
-
-### Fairness caveat
-
-`Hate and Unfairness` checks harmful generated content. It is not a complete fairness test for a business decision. For loans, hiring, benefits, or prioritisation, create domain-specific evaluations comparing outcomes and error rates across relevant groups, with responsible-AI and legal review.
-
-## 16. Agent-specific evaluators
-
-### End-to-end/system evaluation
-
-| Evaluator | What it measures |
-|---|---|
-| **Task Completion** | Whether the agent completed the task and produced a usable result. |
-| **Task Adherence** | Whether it followed instructions, rules, and constraints. |
-| **Intent Resolution** | Whether it correctly understood and addressed user intent. |
-| **Task Navigation Efficiency** | Whether it followed an expected or efficient step sequence, usually against ground truth. |
-| **Customer Satisfaction** | Helpfulness, completeness, clarity, tone, resolution, and adaptability. |
-| **Rubric-based evaluation** | Custom criteria derived from the agent's role and expected behaviour. |
-
-Some agent evaluators are preview features. Verify support before using them as production gates.
-
-### Process/tool-use evaluation
-
-| Evaluator | What it measures |
-|---|---|
-| **Tool Call Accuracy** | Correct tools, parameters, and efficient call sequence. |
-| **Tool Selection** | Necessary tools selected and unnecessary tools avoided. |
-| **Tool Input Accuracy** | Correct values, types, formats, and required fields. |
-| **Tool Output Utilisation** | Tool results used correctly in the reasoning and answer. |
-| **Tool Call Success** | Calls completed without errors or timeouts. |
-
-## 17. Evaluations across the lifecycle
-
-### Before deployment
-
-- Build representative datasets.
-- Include happy paths, edge cases, adversarial prompts, tool failures, missing data, and ambiguity.
-- Establish a baseline and metric-specific thresholds.
-- Compare model, prompt, retrieval, tool, and guardrail variants.
-
-### During CI/CD
-
-- Re-run a stable regression suite after material changes.
-- Prevent promotion when mandatory quality or safety gates fail.
-- Version the agent, dataset, evaluator, judge model, and threshold.
-
-### In production
-
-- Sample conversations and traces with appropriate privacy controls.
-- Monitor operational and quality/safety metrics.
-- Investigate changes in groundedness, task adherence, tool success, and harmful-content rates.
-- Re-evaluate after changing the model, instructions, tools, data, retrieval, or guardrails.
+| Generate text / chat / reasoning | A deployed LLM/SLM via the inference APIs (Part V) |
+| Ground answers on your data (RAG) | Azure AI Search + embeddings, or **Foundry IQ** (Part XIII) |
+| Vector / hybrid / semantic search | Azure AI Search (Part XIII) |
+| Orchestrate tools + memory + autonomy | Foundry **agents** (Part VI) |
+| Image/video generation or editing | Image/video generation models (Part IX) |
+| Understand images/video | Multimodal models / Content Understanding (Part IX) |
+| Analyse or translate text | Language service / Translator / LLM prompting (Part X) |
+| Speech in/out | Azure AI Speech (Part XI) |
+| Extract structured data from documents | Document Intelligence / Content Understanding (Part XII) |
 
 ---
 
-# Part IV: Model deployment types
+# Part II: Model and agent deployment
 
-## 18. What deployment type controls
+## 4. What deployment type controls
 
 For serverless Microsoft Foundry model deployments, type determines:
 
@@ -371,7 +80,7 @@ For serverless Microsoft Foundry model deployments, type determines:
 
 Open-source and custom models on managed compute use a different deployment approach and do not use all these serverless SKUs.
 
-## 19. Three independent dimensions
+## 5. Three independent dimensions
 
 ### 1. Processing scope
 
@@ -392,7 +101,7 @@ For all types, data at rest remains in the designated Azure geography. The disti
 - **Developer:** temporary evaluation of a fine-tuned model, without normal production guarantees.
 - **Instant access:** preview capability to call supported models without a deployment. It is not a deployment type.
 
-## 20. Deployment comparison
+## 6. Deployment comparison
 
 | Deployment type | Typical SKU | Processing | Billing/capacity | Best fit |
 |---|---|---|---|---|
@@ -408,7 +117,7 @@ For all types, data at rest remains in the designated Azure geography. The disti
 
 Availability is model- and region-specific.
 
-## 21. Simple selection guide
+## 7. Simple selection guide
 
 ```text
 Need a normal online endpoint?
@@ -430,7 +139,7 @@ Only validating a fine-tuned model temporarily?
   -> Developer, if supported
 ```
 
-## 22. Key trade-offs
+## 8. Key trade-offs
 
 - **Global Standard:** broad capacity and early model availability, but global processing can violate residency requirements.
 - **Data Zone Standard:** zone-level processing with usage billing, but availability and quota can differ.
@@ -439,7 +148,7 @@ Only validating a fine-tuned model temporarily?
 - **Batch:** lower-cost bulk processing, but asynchronous and unsuitable for interactive chat.
 - **Developer:** useful for evaluation, but temporary and not for normal production.
 
-## 22a. Standard (pay-as-you-go) and quota
+## 9. Standard (pay-as-you-go) and quota
 
 With a **Standard** deployment you pay **per token** and share capacity with other customers. You don't reserve anything.
 
@@ -452,7 +161,7 @@ Your limit is a **TPM quota** (Tokens Per Minute), granted per **subscription + 
 
 **Good for:** low, spiky, or unpredictable traffic — you only pay for what you use.
 
-## 22b. Provisioned (PTU) and how it works
+## 10. Provisioned (PTU) and how it works
 
 A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** you buy for a model — guaranteed tokens/min that are yours alone, not shared.
 
@@ -471,11 +180,9 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 
 **Good for:** high, steady, production traffic needing guaranteed speed and predictable cost.
 
-### Quota in one line
+> **Quota in one line:** quota = your allowance (max you may deploy/consume). Standard **TPM** quota and Provisioned **PTU** quota are **separate buckets**.
 
-**Quota = your allowance (max you may deploy/consume). Standard TPM quota and Provisioned PTU quota are separate buckets.**
-
-## 22c. Model version upgrade policy
+## 11. Model version upgrade policy
 
 **Model version upgrade policy** controls what a deployment does when Azure releases a **new version of the same model** (e.g. a newer `gpt-4o` snapshot). You set it per deployment.
 
@@ -492,140 +199,78 @@ A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** yo
 
 > One line: auto-upgrade = always current but can change behaviour; pin = stable but you own the upgrade. Fine-tunes are pinned to their base version.
 
-# Part V: Fine-tuning
+---
 
-Fine-tuning adapts a pretrained model to a specific task, domain, style, or behaviour using specialized training data.
+# Part III: Security, identity, and operations
 
-## 23. Supervised Fine-Tuning (SFT)
+## 12. Identity and keyless authentication
 
-SFT trains a model on labelled examples in JSONL format. Each example contains a prompt and the desired assistant response, and can also include a system message.
+Foundry resources support two auth styles. **Keyless (Microsoft Entra ID) is strongly preferred** for production.
 
-```text
-System message + user prompt + desired response
-```
-
-**Best suited for:**
-- specific formats, styles, and tones;
-- domain-specific behaviour;
-- improving instruction following.
-
-SFT is usually the recommended starting point when high-quality labelled examples are available.
-
-## 24. Reinforcement Fine-Tuning (RFT)
-
-In RFT, the model generates responses and a grader scores them. Training updates the model to produce responses that achieve higher scores.
-
-The grader can be an LLM, a rule-based evaluator, custom code, or a combination of multiple graders.
-
-```text
-Prompt -> model response -> grader score -> model improvement
-```
-
-**Best suited for:**
-- complex reasoning and problem-solving;
-- tasks with objective checks or clear scoring criteria;
-- cases where ideal labelled responses are difficult to produce.
-
-RFT requires a reliable grader because the model learns to optimize what the grader rewards.
-
-## 25. Direct Preference Optimization (DPO)
-
-DPO trains a model with two responses to the same prompt: one preferred response and one non-preferred response.
-
-```text
-Prompt -> preferred response + non-preferred response
-```
-
-**Best suited for:**
-- tasks without one clearly correct answer;
-- improving tone, style, helpfulness, or response quality;
-- preference data collected from reviews, comparisons, or logs.
-
-DPO can be applied to a supported base model or an SFT-tuned model.
-
-## 26. Function Calling Fine-Tuning (FFT)
-
-FFT is supervised fine-tuning with tool-calling examples. Training data includes tool definitions and examples of the tool calls and arguments the model should produce.
-
-```text
-User prompt + tool definitions -> expected tool call and arguments
-```
-
-**Best suited for:**
-- improving tool selection;
-- producing more accurate and consistent function arguments;
-- reducing reliance on long tool descriptions in every prompt.
-
-The application still executes the function. Fine-tuning improves the model's ability to select and format the call.
-
-## 27. Vision Fine-Tuning (VFT)
-
-VFT extends supervised fine-tuning with image inputs. Training examples use the chat-completions format and include images with prompts and desired assistant responses.
-
-```text
-Image + user prompt -> desired assistant response
-```
-
-**Best suited for:**
-- domain-specific image understanding;
-- visual classification or inspection;
-- consistent descriptions or decisions based on images.
-
-Images can be referenced by accessible URLs or included as base64 data URIs. Model and region support must be checked before use.
-
-## 28. Quick comparison
-
-| Method | Training signal | Best fit |
+| Approach | How | Notes |
 |---|---|---|
-| **SFT** | Desired responses | Format, style, domain behaviour, and instruction following |
-| **RFT** | Grader scores | Reasoning and objectively measurable problem-solving |
-| **DPO** | Preferred versus rejected responses | Subjective quality and preference alignment |
-| **FFT** | Expected tool calls and arguments | Tool selection and function-call accuracy |
-| **VFT** | Images with desired responses | Domain-specific visual understanding |
+| **API keys** | Static key in the request header. | Simple, but a long-lived secret to store/rotate/leak. Good for quick tests only. |
+| **Microsoft Entra ID (keyless)** | Caller presents an Entra token; no secret in code. | Preferred. Use **managed identity** for Azure-hosted apps, or developer identity locally. |
+
+- **Managed identity** gives an Azure resource (Container App, Function, VM, App Service) its own Entra identity — no credentials in code. System-assigned (tied to the resource) or user-assigned (shared across resources).
+- In the SDK, **`DefaultAzureCredential`** automatically uses managed identity in Azure and your signed-in developer identity locally — the same code works in both.
+- **Disable local auth** (turn off key-based access) to force Entra-only, and store any remaining secrets in **Azure Key Vault**.
+
+```python
+from azure.identity import DefaultAzureCredential
+from azure.ai.projects import AIProjectClient
+
+project_client = AIProjectClient(
+    endpoint=foundry_project_endpoint,
+    credential=DefaultAzureCredential(),   # managed identity in Azure, dev identity locally
+)
+```
+
+## 13. Network isolation
+
+- **Private endpoints** put the resource on your VNet with a private IP; traffic avoids the public internet.
+- **Disable public network access** so the resource is reachable only through the private endpoint.
+- Combine with VNet integration for the compute (agent host, function, container app) so the whole path is private.
+- Hosted agents can add **network-egress controls** (preview) to restrict what the agent can call out to.
+
+## 14. RBAC roles
+
+Access is granted with **Azure RBAC** at subscription/resource-group/resource scope — assign the **least-privilege** built-in role rather than Owner.
+
+| Role (example) | Grants |
+|---|---|
+| **Azure AI Developer** | Build/run in a Foundry project (agents, deployments, inference) without full management. |
+| **Cognitive Services User** | Call the data plane (inference) of an AI Services resource. |
+| **Cognitive Services Contributor** | Manage AI Services resources. |
+| **Search Index Data Reader / Contributor** | Read / write Azure AI Search index data (for RAG). |
+| **Storage Blob Data Reader/Contributor** | Read/write blob content used as knowledge sources. |
+
+Give the app's **managed identity** the specific data-plane roles it needs (e.g. *Cognitive Services User* + *Search Index Data Reader*), not broad management roles.
+
+## 15. CI/CD for Foundry projects
+
+- Keep agent definitions, prompts, infra (Bicep/Terraform), and eval datasets in **source control**.
+- In the pipeline: provision/update infra → deploy model/agent versions → **run the evaluation suite** (Part VII) → **gate promotion** on quality/safety thresholds → publish a versioned agent.
+- Version everything together: agent definition, dataset, evaluator, judge model, and thresholds, so results are reproducible.
+- Automation must **enforce** the gate — an eval threshold is only a release gate if the pipeline blocks on it.
+
+## 16. Monitoring and observability
+
+Watch two layers in production:
+
+- **Operational:** latency, throughput, errors, **token usage/cost**, 429 throttling, tool failures.
+- **Quality & safety:** **groundedness**, task adherence, **model drift**, harmful-content/safety-event rates, refusal rates.
+- **Retrieval health (for RAG):** data-ingestion quality, **search index health**, and relevance performance.
+
+Implement it with **tracing** (per-call timings, dependencies, tool steps), telemetry to **Application Insights / Azure Monitor**, and **continuous/online evaluation** on sampled production traffic. Re-evaluate after changing the model, instructions, tools, data, retrieval, or guardrails.
 
 ---
 
-# Part VI: Responsible AI
+# Part IV: Foundry SDK clients
 
-## 29. The six Microsoft Responsible AI principles
+A frequent confusion: the difference between `AIProjectClient`, `get_openai_client()`, and a standalone `AzureOpenAI`. The split is simple: **one manages the project, two run inference.**
 
-Responsible AI (RAI) is the governance layer *around* everything else in this guide. Guardrails and evaluations are two concrete tools you use to satisfy it, but RAI is broader: it covers how you design, build, ship, and operate a system.
-
-| Principle | In plain words | Where it shows up in Foundry |
-|---|---|---|
-| **Fairness** | Treat people equitably; avoid biased or discriminatory outcomes. | `Hate and Unfairness` evaluator; custom decision-fairness tests (§15). |
-| **Reliability & Safety** | Behave as intended, even on edge/adversarial input; fail safely. | Guardrails, content filters, Prompt Shields, evaluations, tracing. |
-| **Privacy & Security** | Protect personal and sensitive data; secure the system. | PII controls, data-residency via deployment type (§18–22), least-privilege identity. |
-| **Inclusiveness** | Work for people of all abilities and backgrounds. | Accessibility review, diverse test data, multilingual/edge-case evaluation. |
-| **Transparency** | People can understand how and why the system behaves. | Tracing/observability, model cards, documented limitations, disclosure to users. |
-| **Accountability** | Humans remain responsible; there is oversight and recourse. | Human-in-the-loop approvals, audit logs, impact assessments, rollback paths. |
-
-### How RAI connects to the rest of this guide
-
-```text
-Responsible AI principles (why + governance)
-  -> Impact assessment            (identify harms before building)
-  -> Guardrails / Content Safety  (block harm at runtime)        <- Part I
-  -> Evaluations                  (measure harm/quality)         <- Part III
-  -> Deterministic controls       (limits, approvals, schemas)   <- Section 6
-  -> Monitoring + audit           (detect drift, keep records)   <- Sections 9, 17
-```
-
-### Exam-relevant facts
-
-- Microsoft's RAI framework lists **six principles**; two of them (**Transparency**, **Accountability**) are "overarching" and apply to all the others.
-- **Content Safety** is the classifier service behind many guardrails and safety evaluators; it is a *tool* that serves the Reliability & Safety and Fairness principles, not the whole of RAI.
-- A **Responsible AI Impact Assessment** is done **before** development to identify intended uses, stakeholders, and potential harms.
-- Guardrails ≠ RAI and evaluations ≠ RAI; they are **implementations** of RAI principles. Governance, documentation, and human accountability are also required.
-- RAI is **not** solved by the model's built-in alignment alone; it needs system-level design, testing, and operations.
-
----
-
-# Part VII: Foundry SDK clients — which client does what
-
-Three clients get confused: `AIProjectClient`, `get_openai_client()`, and `AzureOpenAI`. The split is simple: **one manages the project, two run inference.**
-
-## 30. The three clients
+## 17. The three clients
 
 | Client | Plane | Use it to |
 |---|---|---|
@@ -634,8 +279,6 @@ Three clients get confused: `AIProjectClient`, `get_openai_client()`, and `Azure
 | **`AzureOpenAI`** | Data (run) | Run inference against an Azure OpenAI endpoint **with no project** — you set `azure_endpoint`, `api_version`, and auth yourself. |
 
 Imports: `from azure.ai.projects import AIProjectClient` · `from openai import AzureOpenAI`.
-
-### Mental model
 
 ```text
 AIProjectClient            # control plane: agents, connections, eval, data
@@ -647,8 +290,6 @@ AIProjectClient            # control plane: agents, connections, eval, data
 - `AzureOpenAI` is the same inference surface (`.responses`, `.chat.completions`, `.embeddings`, …) **without** the project layer — no `.agents`, no `.connections`.
 - Plain **`OpenAI`** points at OpenAI.com, not Azure — not used for Foundry work.
 
-### Which to pick
-
 | Goal | Client |
 |---|---|
 | Create/version agents, manage connections, run evaluations | `AIProjectClient` |
@@ -657,11 +298,11 @@ AIProjectClient            # control plane: agents, connections, eval, data
 
 ---
 
-# Part VIII: Inference APIs — responses, conversations, chat.completions, agents.create_version
+# Part V: Inference APIs and prompt engineering
+
+## 18. The four calls
 
 These four calls look similar but sit at different layers. Understanding how they **combine** is the point.
-
-## 31. The four calls
 
 | Call | Layer | What it does |
 |---|---|---|
@@ -670,29 +311,12 @@ These four calls look similar but sit at different layers. Understanding how the
 | **`conversations.create(...)`** | Server-side state | Creates a **conversation object** that stores turn history on the server. You then pass its `id` to `responses.create(conversation=...)` instead of resending history. |
 | **`agents.create_version(...)`** | Control plane (definition) | Creates/updates a **durable agent version** (model + instructions + tools + policy) via `AIProjectClient.agents`. It does **not** run inference — it defines the agent you later invoke. |
 
-## 32. How they differ and combine
-
-### chat.completions vs responses
+## 19. How they differ and combine
 
 - **chat.completions**: you manage history yourself (resend every message). `.parse` gives typed/structured output.
-- **responses**: newer, cleaner input shape, native tools + streaming, and optional server-side conversation state. For Foundry, prefer **responses** unless you specifically need chat.completions compatibility.
-
-### Where conversations fit
-
-`conversations.create()` is **not** an inference call. It returns a state container. Combine it with responses:
-
-```python
-conversation = openai_client.conversations.create()
-openai_client.responses.create(
-    conversation=conversation.id,   # server remembers prior turns
-    input=user_input,
-    stream=True,
-)
-```
-
-### Where agents.create_version fits
-
-`agents.create_version` defines the agent once (control plane). You then **invoke** that agent through the data plane — `responses.create` with an `agent_reference` — optionally inside a conversation:
+- **responses**: newer, cleaner input shape, native tools + streaming, optional server-side conversation state. Prefer **responses** for Foundry unless you need chat.completions compatibility.
+- **conversations.create()** is **not** an inference call — it returns a state container you attach to `responses.create`.
+- **agents.create_version** defines the agent once (control plane); you **invoke** it via `responses.create` with an `agent_reference`, optionally inside a conversation.
 
 ```python
 # 1. Define the agent (control plane, once)
@@ -717,8 +341,6 @@ openai_client.responses.create(
 )
 ```
 
-### One-line mental model
-
 ```text
 agents.create_version   = define the agent      (control plane, durable)
 conversations.create    = remember the session  (data plane, state)
@@ -727,115 +349,583 @@ chat.completions.create = run a stateless turn  (data plane, no server state)
        .parse           = same, but typed/structured output
 ```
 
-- **Differ:** control plane (define) vs data plane (run); stateless vs stateful.
-- **Combine:** `create_version` → (reference by) `responses.create` → (state from) `conversations.create`.
+## 20. Prompt engineering and model parameters
+
+Before fine-tuning (Part VIII), shape behaviour with **prompting** and **parameters** — cheaper and faster to iterate.
+
+### Prompting techniques
+
+- **System / instructions message:** sets role, rules, and constraints. The strongest lever on behaviour.
+- **Few-shot examples:** include input→output examples to teach format and style.
+- **Grounding:** inject retrieved context (RAG) and tell the model to answer only from it — reduces fabrication.
+- **Chain-of-thought / step-by-step:** ask for reasoning on hard tasks (or use a reasoning model).
+- **Structured outputs:** request JSON against a schema (`responses` structured output / `chat.completions.parse`) for reliable machine-readable results.
+
+### Key model parameters
+
+| Parameter | Effect |
+|---|---|
+| **`temperature`** | Randomness. Low (0–0.3) = focused/deterministic; high (0.7–1) = creative/varied. |
+| **`top_p`** | Nucleus sampling — alternative to temperature (sample from the top *p* probability mass). Tune one, not both. |
+| **`max_tokens` / `max_output_tokens`** | Caps the response length (and cost). |
+| **`stop`** | Sequences that end generation. |
+| **`seed`** | Requests more reproducible output for the same input. |
+| **`frequency_penalty` / `presence_penalty`** | Reduce repetition / encourage new topics. |
+
+> Rule of thumb: for **factual/extraction** tasks use **low temperature**; for **creative** tasks raise it. Control length and cost with **max_tokens**, and prefer **structured outputs** when another system consumes the result.
 
 ---
 
-# Part IX: A2A anatomy
+# Part VI: Agents — lifecycle, tools, and orchestration
 
-**Agent-to-Agent (A2A)** is an open protocol that lets one agent discover and call another over HTTP. A Foundry agent is wrapped in an A2A **server** so other agents (or clients) can invoke it in a standard way. The server in this repo (`MicrosoftFoundry/A2A/A2A_Container_Apps/A2A_Server/`) shows every part.
+An **agent** is a durable **definition/version** (model + instructions + tools + policy). A **session/conversation** gives continuity across turns; a **run/response** performs one task.
 
-## 33. The five building blocks
+## 21. Development and operational lifecycle
+
+1. **Define use case and risk**: task, users, data, autonomy, forbidden actions, success criteria, and approval points.
+2. **Choose agent type**: prompt, voice-based prompt, or hosted agent.
+3. **Choose and deploy the model**: balance quality, tools, latency, cost, capacity, and data-processing needs.
+4. **Create the agent**: configure instructions, model, tools, knowledge, identity, and session behaviour.
+5. **Add data and tools**: connect only what is required and apply least privilege.
+6. **Add guardrails and deterministic controls**: cover inputs, tools, outputs, schemas, approvals, and limits.
+7. **Test and trace**: use normal, edge, adversarial, and failure cases; inspect model and tool calls.
+8. **Evaluate**: measure quality, safety, retrieval, task outcome, and tool behaviour against repeatable tests.
+9. **Optimize hosted agents (preview)**: tune hosted-agent configuration and performance before publishing.
+10. **Version and publish**: save a known version and expose a stable integration.
+11. **Monitor production**: watch latency, errors, token usage, safety signals, tool failures, and quality drift.
+12. **Improve or roll back**: change model, instructions, tools, retrieval, or policy; then rerun regression tests.
+13. **Retire**: remove access, revoke connections/identities, preserve required audit evidence, and migrate users.
+
+## 22. Runtime lifecycle of one agent request
+
+```text
+Receive input
+  -> inspect input
+  -> load session/context
+  -> model plans or selects next step
+  -> optional tool call
+  -> inspect and authorise tool call
+  -> execute tool
+  -> inspect tool response
+  -> model continues with updated context
+  -> repeat until complete or stopped
+  -> inspect final output
+  -> return response and record telemetry
+```
+
+Possible end states include successful completion, blocked content, tool failure, timeout, cancellation, exceeded limits, refusal, or human escalation.
+
+## 23. Versions, sessions, and runs
+
+- **Agent definition/version:** durable configuration containing model, instructions, tools, and policy references.
+- **Session/conversation:** persistent context connecting multiple user turns (the agent's **memory**).
+- **Run/response:** one execution in a session, potentially containing several model and tool steps.
+- **Trace:** observability record of calls, timings, dependencies, and errors.
+
+The definition provides behaviour, the session provides continuity, and the run performs the current task.
+
+## 24. Tools and knowledge integration
+
+Agents become useful by calling **tools** and **knowledge**:
+
+- **Function calling / custom functions:** the model proposes a call with arguments against a **tool schema**; your app executes it and returns the result. Give the model precise schemas.
+- **Knowledge stores / search:** connect Azure AI Search or **Foundry IQ** (Part XIII) so the agent can retrieve and ground answers.
+- **Content Understanding / Document Intelligence:** let the agent extract from documents and images.
+- **MCP (Model Context Protocol) tools:** connect external tool servers (e.g. a knowledge base exposed as `knowledge_base_retrieve`) with `require_approval` and `allowed_tools` controls.
+- **APIs / OpenAPI tools:** call external services.
+
+Apply **least privilege**: connect only the tools required, and guard consequential ones with schemas, validation, approvals, and limits (Part VII).
+
+## 25. Multi-agent orchestration and A2A
+
+For complex work, split responsibilities across **multiple agents** (e.g. a planner/orchestrator that calls specialist agents). Patterns include sequential hand-off, routing, and parallel fan-out/fan-in, with **safeguards and approval flow controls** between steps.
+
+**Agent-to-Agent (A2A)** is an open protocol that lets one agent discover and call another over HTTP. A Foundry agent is wrapped in an A2A **server** so other agents/clients can invoke it in a standard way.
 
 | Part | Type / class | Role |
 |---|---|---|
-| **Skill** | `AgentSkill` | A single capability the agent advertises: `id`, `name`, `description`, `tags`, `examples`. One agent can list several skills. It's a **description** of what the agent can do, not the implementation. |
-| **Agent Card** | `AgentCard` | The agent's public "business card" at a well-known URL. Holds `name`, `description`, `url`, `version`, input/output modes, `capabilities` (e.g. streaming), and the list of `skills`. Other agents **read the card to discover** this agent. |
-| **Executor** | `AgentExecutor` subclass | The **implementation**. Its `execute(context, event_queue)` runs the actual work — reads the user input from `RequestContext`, calls the underlying Foundry agent, and streams results back as events. Must also implement `cancel(...)`. This is where skills become real behaviour. |
-| **Request Handler** | `DefaultRequestHandler` | The **wiring** between the protocol and your executor. Takes the `agent_executor` plus a `task_store` (e.g. `InMemoryTaskStore`) and manages the task lifecycle (receive request → run executor → track task state). |
-| **Server** | `A2AStarletteApplication` + `uvicorn` | The **HTTP app**. Combines the `agent_card` and the `http_handler` (the request handler), exposes the card and endpoints, and serves them (here on port 8080). |
-
-### How a request flows
+| **Skill** | `AgentSkill` | A single capability the agent advertises: `id`, `name`, `description`, `tags`, `examples`. A **description** of what it can do, not the implementation. |
+| **Agent Card** | `AgentCard` | The agent's public "business card" at a well-known URL: `name`, `url`, `version`, input/output modes, `capabilities` (e.g. streaming), and the `skills`. Others **read the card to discover** it. |
+| **Executor** | `AgentExecutor` subclass | The **implementation**. `execute(context, event_queue)` reads input, calls the underlying Foundry agent, and streams results back as events. Also implements `cancel(...)`. |
+| **Request Handler** | `DefaultRequestHandler` | The **wiring** between protocol and executor. Takes the `agent_executor` plus a `task_store` and manages the task lifecycle. |
+| **Server** | `A2AStarletteApplication` + `uvicorn` | The **HTTP app**. Combines the `agent_card` and the request handler and serves them. |
 
 ```text
 Caller reads the Agent Card (discovery)
-  -> HTTP request hits the A2A server (A2AStarletteApplication)
-  -> Request Handler (DefaultRequestHandler) creates/tracks a Task
+  -> HTTP request hits the A2A server
+  -> Request Handler creates/tracks a Task
   -> Executor.execute(context, event_queue)
-        - context.get_user_input()        # the query
-        - invoke underlying Foundry agent # responses.create stream
-        - enqueue TaskArtifactUpdateEvent # stream chunks back
+        - context.get_user_input()
+        - invoke underlying Foundry agent  # responses.create stream
+        - enqueue TaskArtifactUpdateEvent  # stream chunks back
   -> Handler emits TaskStatusUpdateEvent(state=completed, final=True)
   -> Response streamed to the caller
 ```
 
-### Exam-relevant facts
-
-- **Agent Card = discovery/metadata; Executor = behaviour.** Don't confuse "what it says it can do" (skill/card) with "what it actually does" (executor).
-- A **skill** is declarative (advertised on the card); the **executor** is where that skill is implemented.
-- The **request handler needs a task store** because A2A models work as **tasks** with lifecycle states (e.g. `completed`) and streamed artifacts/status events.
-- `capabilities=AgentCapabilities(streaming=True)` on the card tells callers the agent can stream — the executor then yields `TaskArtifactUpdateEvent`s.
-- The underlying Foundry agent is invoked inside `execute` using the data-plane pattern from Part VIII (`responses.create` with an `agent_reference` + a conversation).
+- **Agent Card = discovery/metadata; Executor = behaviour.** A **skill** is declarative (advertised); the **executor** implements it.
+- The request handler needs a **task store** because A2A models work as **tasks** with lifecycle states and streamed artifacts/status events.
+- `capabilities=AgentCapabilities(streaming=True)` tells callers the agent can stream; the executor then yields `TaskArtifactUpdateEvent`s.
 
 ---
 
-# Part X: Document extraction — Document Intelligence and Content Understanding
+# Part VII: Responsible AI, guardrails, evaluations, and red teaming
 
-Two Azure services turn documents (and, for Content Understanding, other modalities) into structured data. Both follow the **same async poller pattern** and both offer **prebuilt** and **custom** options.
+Responsible AI (RAI) is the governance layer *around* the whole system. **Guardrails** (runtime blocking), **evaluations** (measuring behaviour), and **red teaming** (attack testing) are concrete tools that implement RAI principles — they are *not* the same as RAI itself.
 
-## 34. The two services and their prebuilt analyzers
+## 26. The six Responsible AI principles
+
+| Principle | In plain words | Where it shows up in Foundry |
+|---|---|---|
+| **Fairness** | Treat people equitably; avoid biased or discriminatory outcomes. | `Hate and Unfairness` evaluator; custom decision-fairness tests (§35). |
+| **Reliability & Safety** | Behave as intended, even on edge/adversarial input; fail safely. | Guardrails, content filters, Prompt Shields, evaluations, tracing. |
+| **Privacy & Security** | Protect personal and sensitive data; secure the system. | PII controls, data-residency via deployment type (Part II), least-privilege identity (Part III). |
+| **Inclusiveness** | Work for people of all abilities and backgrounds. | Accessibility review, diverse test data, multilingual/edge-case evaluation. |
+| **Transparency** | People can understand how and why the system behaves. | Tracing/observability, model cards, documented limitations, disclosure to users. |
+| **Accountability** | Humans remain responsible; there is oversight and recourse. | Human-in-the-loop approvals, audit logs, impact assessments, rollback paths. |
+
+```text
+Responsible AI principles (why + governance)
+  -> Impact assessment            (identify harms before building)
+  -> Guardrails / Content Safety  (block harm at runtime)        <- §27–32
+  -> Evaluations                  (measure harm/quality)         <- §33–38
+  -> Red teaming                  (attack-test the defences)     <- §39
+  -> Deterministic controls       (limits, approvals, schemas)   <- §31
+  -> Monitoring + audit           (detect drift, keep records)   <- §16
+```
+
+- The RAI framework lists **six principles**; **Transparency** and **Accountability** are "overarching" and apply to all the others.
+- **Content Safety** is the classifier service behind many guardrails and safety evaluators — a *tool*, not the whole of RAI.
+- A **Responsible AI Impact Assessment** is done **before** development to identify intended uses, stakeholders, and potential harms.
+- RAI is **not** solved by the model's built-in alignment alone; it needs system-level design, testing, and operations.
+
+## 27. What is a guardrail?
+
+A **guardrail** is a named collection of **controls**. Each control defines:
+
+1. a **risk** to detect;
+2. one or more **intervention points** to inspect;
+3. the **action** taken when the risk is detected.
+
+Guardrails use safety classifiers, including Azure AI Content Safety capabilities. They are an extra runtime layer around the workload. They do not retrain the model and are not the same as system instructions or the model's built-in alignment.
+
+## 28. Model guardrails versus agent guardrails
+
+**Model guardrails** have two relevant intervention points:
+
+- **User input:** the prompt before inference.
+- **Output:** the model completion before it is returned.
+
+**Agent guardrails** can have up to four:
+
+- **User input:** the request before agent processing.
+- **Tool call:** the action/data the agent proposes to send to a tool. Agent-only, preview.
+- **Tool response:** content returned by a tool before the agent uses it. Agent-only, preview.
+- **Output:** the final answer before it reaches the user.
+
+Tool-call and tool-response moderation depends on support in the relevant agent and tool path. Do not assume every custom tool is automatically covered.
+
+## 29. Default behaviour
+
+- **Model deployments** are assigned **Microsoft.DefaultV2** by default — baseline filtering on supported inputs and outputs.
+- **Foundry agents** depend on type/config: with inheritance, an agent without its own policy uses the model deployment's guardrail; a custom agent policy **overrides** the model policy for the agent flow; a **hosted agent** has an optional `rai_config` — omitting it means **no platform content-safety guardrail**, while `rai_config` present with no policy name applies `Microsoft.DefaultV2`.
+
+> So "all agents use DefaultV2 by default" is too broad. Always check the agent type and attached RAI policy.
+
+## 30. What happens with custom guardrails?
+
+- **Custom on model, none on agent:** inheriting agent types follow the model policy for input/output; tool-call/response protection exists only where supported.
+- **Custom on both:** the **agent policy overrides the model policy for the agent flow** — policies are **not merged**. A stricter model policy does not fill gaps in a weaker agent policy.
+- **Default model + custom agent:** the agent policy governs the agent flow; it must explicitly contain every required risk and intervention point.
+- **Direct model calls outside the agent:** still use the model deployment's guardrail; an agent policy does not protect unrelated direct calls.
+
+**Practical rule:** treat model and agent entry points as separate attack surfaces — configure the model for direct use, configure the agent for prompts/tool calls/tool responses/final answers, test both paths, and never assume the policies are merged.
+
+## 31. Annotate versus block
+
+| Action | Models | Agents (Preview) |
+|---|---:|---:|
+| Annotate | ✅ | ❌ |
+| Annotate and block | ✅ | ✅ |
+
+- **Annotate** detects and labels a risk but lets content continue; the app inspects/logs the safety metadata and decides. Model-only as a standalone action.
+- **Annotate and block** records the detection and **stops the flow** at that intervention point (input blocked before reaching the model/agent; model output blocked; tool call not executed; unsafe tool response not passed on; agent output not delivered).
+
+**Why agents need more than content filters:** an agent can affect external systems. For consequential tools, combine guardrails with **deterministic controls** — allow-listed tools/destinations, strict schemas and business validation, least-privilege identity, human confirmation before high-impact actions, transaction limits and idempotency, and audit logs/traces/rollback. A probabilistic classifier should not be the only authorisation boundary around an action.
+
+## 32. Common guardrail controls
+
+- hate/unfairness, violence, sexual, and self-harm content filters;
+- **Prompt Shields** for direct and indirect prompt attacks;
+- protected-material detection;
+- custom blocklists;
+- groundedness-related checks where supported;
+- PII or sensitive-information controls where supported;
+- network-egress controls for hosted agents (preview).
+
+Availability varies by model, region, agent type, and preview status.
+
+## 33. What an evaluator measures
+
+An evaluator scores one dimension of quality, safety, retrieval, or agent behaviour. Some are deterministic; others use an **LLM-as-judge** or Azure AI Content Safety. Use several metrics because one score cannot represent overall correctness, usefulness, and safety.
+
+### General quality evaluators
+
+**Coherence** and **Fluency** check the writing itself (no reference needed):
+
+| Evaluator | In plain words |
+|---|---|
+| **Coherence** | Does the answer make sense and flow logically, without contradicting itself? |
+| **Fluency** | Is the language smooth and natural (grammar, wording)? |
+
+**Similarity, F1, BLEU/GLEU, ROUGE, METEOR** all compare the answer to a **reference answer** — they just match differently. Running example reference: **"The cat sat on the mat."**
+
+| Evaluator | What it looks at | On the example |
+|---|---|---|
+| **Similarity** | **Meaning**, not exact words (AI judge). | "A feline rested on the rug" → same meaning → **high**. |
+| **F1** | **Single words** that match, without junk. | "The cat sat on the big red soft mat indoors" → extra words → **lower**. |
+| **BLEU / GLEU** | **Short phrases in order.** Common for **translation**. | "on the mat" in order scores; "mat the on" less. |
+| **ROUGE** | **Coverage** of the reference's content. Common for **summaries**. | Did the summary include the key points? |
+| **METEOR** | Same idea, **most forgiving** — accepts **synonyms**/order. | "big" vs "large" → still counts. |
+
+**Takeaway:** Similarity = meaning; the other four = word matching against a reference, from strict (F1, BLEU) to generous (METEOR).
+
+## 34. RAG and grounding evaluators
+
+**What is RAG?** The system **searches for documents**, then the model **answers using them**. Two things to check: did it **find the right documents**, and did it **use them properly**? (Like an open-book exam: pick the right page, then answer from it.)
+
+**Did it find the right documents?**
+
+| Evaluator | In plain words |
+|---|---|
+| **Retrieval** | Did the search bring back useful, relevant documents (best ones near the top)? |
+| **Document Retrieval** | Same, but scored against a known list of correct documents (a facit). |
+
+**Did it answer properly from them?**
+
+| Evaluator | In plain words |
+|---|---|
+| **Groundedness** | Is the answer backed up by the documents it was given? Scored **1–5** by a judge model. |
+| **Groundedness Pro** | Same, but **pass/fail** (uses Content Safety, no judge model). Preview. |
+| **Relevance** | Does the answer actually address the question? |
+| **Response Completeness** | Did it include all important points? Preview. |
+
+Three different questions people mix up:
+
+- **Groundedness** → "Is it supported by *these documents*?"
+- **Relevance** → "Does it answer *the question*?"
+- **Correctness** → "Is it *actually true* in the real world?"
+
+> Key point: **Groundedness only checks "does the document support this?" — not whether the document itself is right.**
+
+### RAG vs multimodal RAG
+
+- **RAG:** retrieve relevant **text** (usually via Azure AI Search), feed it to the model so the answer is grounded. Text in, text out.
+- **Multimodal RAG:** grounding content also includes **images, charts, diagrams, scanned pages, tables, video/audio frames**, using **multimodal embeddings** + parsing services (**Document Intelligence / Content Understanding**) and a multimodal model (e.g. GPT-4o).
+
+> One line: **RAG grounds on text; multimodal RAG grounds on text + images/visual content.**
+
+## 35. Fairness and safety evaluators
+
+Foundry represents fairness-related generative-AI evaluation through **Hate and Unfairness**, not one universal fairness score.
+
+| Evaluator | Short explanation |
+|---|---|
+| **Hate and Unfairness** | Hateful, discriminatory, biased, or unfair content involving protected/vulnerable groups. |
+| **Violence** | Violent content and severity. |
+| **Sexual** | Sexual content and severity. |
+| **Self-harm** | Self-harm content and severity. |
+| **Protected Material** | Possible reproduction of protected text or code. |
+| **Indirect Attack / Prompt Injection** | Untrusted retrieved content trying to manipulate the model/agent. |
+| **Code Vulnerability** | Insecure patterns in generated code where available. |
+
+**Fairness caveat:** `Hate and Unfairness` checks harmful content; it is **not** a complete fairness test for a business decision. For loans, hiring, benefits, or prioritisation, build domain-specific evaluations comparing outcomes and error rates across groups, with responsible-AI and legal review.
+
+## 36. Agent-specific evaluators
+
+**End-to-end / system:**
+
+| Evaluator | What it measures |
+|---|---|
+| **Task Completion** | Did the agent complete the task with a usable result? |
+| **Task Adherence** | Did it follow instructions, rules, and constraints? |
+| **Intent Resolution** | Did it understand and address user intent? |
+| **Task Navigation Efficiency** | Did it follow an expected/efficient step sequence (vs ground truth)? |
+| **Customer Satisfaction** | Helpfulness, completeness, clarity, tone, resolution, adaptability. |
+| **Rubric-based evaluation** | Custom criteria from the agent's role and expected behaviour. |
+
+**Process / tool-use:**
+
+| Evaluator | What it measures |
+|---|---|
+| **Tool Call Accuracy** | Correct tools, parameters, efficient sequence. |
+| **Tool Selection** | Necessary tools selected, unnecessary avoided. |
+| **Tool Input Accuracy** | Correct values, types, formats, required fields. |
+| **Tool Output Utilisation** | Tool results used correctly in reasoning/answer. |
+| **Tool Call Success** | Calls completed without errors/timeouts. |
+
+Some agent evaluators are preview — verify support before using them as production gates.
+
+## 37. Evaluations across the lifecycle
+
+- **Before deployment:** build representative datasets (happy paths, edge cases, adversarial prompts, tool failures, missing data, ambiguity); set a baseline and metric thresholds; compare model/prompt/retrieval/tool/guardrail variants.
+- **During CI/CD:** re-run a stable regression suite after material changes; block promotion on failed mandatory gates; version agent, dataset, evaluator, judge model, and threshold.
+- **In production:** sample conversations/traces with privacy controls; monitor operational and quality/safety metrics; investigate changes in groundedness, task adherence, tool success, and harmful-content rates; re-evaluate after changes.
+
+## 38. Guardrails are not evaluations
+
+| Guardrails | Evaluations |
+|---|---|
+| Run in the live request/agent path | Run against datasets, traces, simulations, or production samples |
+| Intervene immediately | Measure behaviour and produce scores/results |
+| Can block content or actions | Do not normally stop a live request by themselves |
+| Protect runtime interactions | Help decide readiness and detect regression |
+
+Evaluation thresholds can become CI/CD release gates, but automation must enforce the gate.
+
+## 39. Red teaming
+
+**Red teaming = you attack your own AI on purpose** to find safety problems **before** real users or attackers do — like a fire drill. It is *testing*, not a live block.
+
+Foundry's **AI Red Teaming Agent** automates it, built on **PyRIT** (Python Risk Identification Tool).
+
+- **When:** before you deploy, and after big changes.
+- **What it does:** sends lots of "bad" prompts to your target, then uses Content Safety to grade whether the answer was harmful.
+- **Target:** a deployed model, a function, or an agent.
+
+**Filters it tests** (the same content-safety categories as guardrails): **Hate & unfairness, Violence, Sexual, Self-harm**. A separate filter, **Prompt Shields**, catches *jailbreak* / prompt-injection attempts.
+
+**Attack difficulty:** it asks the bad question plainly (**Baseline**), then **disguises** it at rising difficulty (**Easy → Moderate → Difficult**) using:
+
+| Technique | What it does | "hello" |
+|---|---|---|
+| **Base64** | Encodes text into a letters/numbers string. | `aGVsbG8=` |
+| **Morse code** | Letters → dots/dashes. | `.... . .-.. .-.. ---` |
+| **ROT13 / Caesar** | Shifts letters a fixed number of steps. | `uryyb` |
+| **Character flip / swap** | Reverses/scrambles letters. | `olleh` |
+| **Unicode / leetspeak** | Look-alike symbols/numbers. | `h3ll0` |
+| **Jailbreak prompt** | *Talks the model out of its rules* (prompt injection → Prompt Shields). | — |
+
+**Key metric — Attack Success Rate (ASR):** of all attacks, how many got a harmful answer through. **Lower = safer** (0% = nothing got past). Reported as a **scorecard** by filter and difficulty.
+
+> Two families of disguise: **encode the words** (Base64, Morse, ROT13, flipping, leetspeak) vs **jailbreak** (argue the model out of its rules).
+
+---
+
+# Part VIII: Fine-tuning
+
+Fine-tuning adapts a pretrained model to a specific task, domain, style, or behaviour using specialized training data. Reach for it after prompting and parameters (Part V) are not enough.
+
+## 40. Supervised Fine-Tuning (SFT)
+
+SFT trains a model on labelled examples in JSONL format. Each example contains a prompt and the desired assistant response, and can include a system message.
+
+```text
+System message + user prompt + desired response
+```
+
+**Best for:** specific formats/styles/tones; domain-specific behaviour; improving instruction following. Usually the recommended starting point when high-quality labelled examples are available.
+
+## 41. Reinforcement Fine-Tuning (RFT)
+
+The model generates responses and a grader scores them; training updates the model to produce higher-scoring responses. The grader can be an LLM, a rule-based evaluator, custom code, or a combination.
+
+```text
+Prompt -> model response -> grader score -> model improvement
+```
+
+**Best for:** complex reasoning/problem-solving; tasks with objective checks or clear scoring; cases where ideal labelled responses are hard to produce. Requires a **reliable grader** because the model optimizes what the grader rewards.
+
+## 42. Direct Preference Optimization (DPO)
+
+DPO trains with two responses to the same prompt: one preferred, one not.
+
+```text
+Prompt -> preferred response + non-preferred response
+```
+
+**Best for:** tasks without one correct answer; improving tone/style/helpfulness; preference data from reviews, comparisons, or logs. Can apply to a base model or an SFT-tuned model.
+
+## 43. Function Calling Fine-Tuning (FFT)
+
+FFT is supervised fine-tuning with tool-calling examples (tool definitions + expected calls/arguments).
+
+```text
+User prompt + tool definitions -> expected tool call and arguments
+```
+
+**Best for:** improving tool selection; more accurate/consistent function arguments; reducing long tool descriptions in every prompt. The app still executes the function.
+
+## 44. Vision Fine-Tuning (VFT)
+
+VFT extends supervised fine-tuning with image inputs (chat-completions format, images + prompts + desired responses).
+
+```text
+Image + user prompt -> desired assistant response
+```
+
+**Best for:** domain-specific image understanding; visual classification/inspection; consistent image-based decisions. Images via URL or base64 data URI. Check model/region support.
+
+## 45. Quick comparison
+
+| Method | Training signal | Best fit |
+|---|---|---|
+| **SFT** | Desired responses | Format, style, domain behaviour, instruction following |
+| **RFT** | Grader scores | Reasoning and objectively measurable problem-solving |
+| **DPO** | Preferred vs rejected responses | Subjective quality and preference alignment |
+| **FFT** | Expected tool calls and arguments | Tool selection and function-call accuracy |
+| **VFT** | Images with desired responses | Domain-specific visual understanding |
+
+---
+
+# Part IX: Computer vision
+
+Covers the AI-103 computer-vision domain: generating and editing images/video, understanding visual content, and keeping visual content safe.
+
+## 46. Image generation
+
+- **Text-to-image:** a generation model (e.g. GPT-image / DALL·E family) produces an image from a **text prompt**; you can also provide **reference media** to steer style/content.
+- **Generation controls:** size/aspect ratio, number of images (`n`), quality/style, and **transparency** (where supported) to produce images with alpha for compositing.
+- Output is returned as image data (URL or base64) that you save or pass downstream.
+
+## 47. Image editing (inpainting and masks)
+
+- **Inpainting / mask-based edits:** supply the original image **plus a mask** marking the region to change; the model regenerates only the masked area from a prompt (replace an object, remove/clean up, extend a scene).
+- **Prompt-driven modifications:** change style, lighting, or content via instructions while keeping the rest.
+- Choose the right control for the job: full generation vs targeted mask edit vs prompt-only edit.
+
+## 48. Video generation and editing
+
+- **Text-to-video:** a video-generation model (e.g. Sora family) produces a short clip from a **text prompt** and optional **reference media**.
+- **Editing generated video:** apply platform workflows to trim, extend, or modify clips.
+- Video generation is heavier/slower — generation typically runs **asynchronously** (submit a job, poll for the result).
+
+## 49. Multimodal visual understanding
+
+Use a **multimodal model** (e.g. GPT-4o) or vision services to interpret images/video:
+
+- **Captioning:** produce **concise** or **detailed** captions for single or multiple images.
+- **Visual question-answering:** answer questions **grounded in the visual evidence** of an image.
+- **Alt-text & accessibility:** generate alt-text and extended descriptions aligned to accessibility guidelines.
+- **Object/region detection:** identify objects, components, or regions within images or video.
+- You pass images to the model by **URL or base64**, alongside the text prompt.
+
+## 50. Content Understanding for vision
+
+**Azure Content Understanding** (a Foundry Tool) extracts structured **visual characteristics** from images and video with a defined **analyzer**:
+
+- **Single-task mode:** one focused extraction.
+- **Pro mode:** richer, multi-aspect analysis pipelines for more complex understanding.
+- **Video analysis:** process and interpret video **segments**.
+- Produces clean, structured output you can feed to agents and RAG.
+
+## 51. Responsible AI for visual content
+
+- **Visual content filters:** classify and block unsafe or disallowed **images** (the content-safety categories applied to vision).
+- **Indirect prompt injection via images:** detect/mitigate **text embedded inside an image** that tries to manipulate the model (a visual prompt-injection attack).
+- **Visual policy rules:** apply **watermarks**, flag **prohibited symbols**, uphold **brand-usage** requirements, and detect potentially inappropriate content.
+
+---
+
+# Part X: Text analysis
+
+Covers extracting meaning from text and translating it, using the **Language** service, **Translator**, or **LLM prompting** — whichever fits the task.
+
+## 52. Language analysis
+
+Two routes: purpose-built **Language service** capabilities, or **generative prompting** with an LLM (often returning **structured JSON**).
+
+| Task | What it does |
+|---|---|
+| **Named Entity Recognition (NER)** | Find entities (people, places, organizations, dates, quantities). |
+| **Key phrase extraction** | Pull out the main topics/phrases. |
+| **Sentiment & opinion mining** | Classify positive/neutral/negative and **tone**; link opinions to targets. |
+| **PII detection** | Find and redact personal/sensitive information. |
+| **Summarization** | Extractive (pick key sentences) or abstractive (generate a summary). |
+| **Language detection** | Identify the input language. |
+| **Custom text classification / custom NER** | Train on your labels for domain categories/entities. |
+
+- **Language service** = reliable, cheaper, trainable for well-defined tasks.
+- **LLM prompting** = flexible; extract **entities, topics, summaries, and structured JSON** in one call, and customize for domain tasks (e.g. compliance summarization). Request **structured outputs** for machine-readable results.
+
+## 53. Translation
+
+- **Azure Translator** (a Foundry Tool): fast, scalable **text translation** across many languages, plus **transliteration** and **document translation**; supports custom/glossary terminology.
+- **LLM-powered translation:** an LLM can translate with more context/tone control inside a generative flow.
+- Choose **Translator** for high-volume, well-defined translation; an **LLM** when you need context-aware or integrated-into-a-prompt translation.
+
+---
+
+# Part XI: Speech
+
+Speech lets agents listen and talk, and translate spoken language — the AI-103 speech skills.
+
+## 54. Speech to text and text to speech
+
+- **Speech-to-text (STT):** transcribe audio to text — real-time (streaming) or batch. The input side of a voice agent.
+- **Text-to-speech (TTS):** synthesize natural speech from text, with selectable/neural voices and **SSML** for pronunciation, pace, and emphasis. The output side of a voice agent.
+- Together they make **speech an agent modality**: user speaks → STT → agent reasons → TTS → agent speaks.
+
+## 55. Custom speech, translation, and audio-native models
+
+- **Custom speech models:** adapt STT to domain vocabulary, accents, or noisy conditions for better accuracy.
+- **Speech translation:** translate spoken input into another language (speech-to-text or speech-to-speech), via the Speech service or LLM/Foundry Tools.
+- **Audio-native multimodal models:** some multimodal models reason **directly over audio input** (no separate transcription step), enabling richer audio understanding.
+
+---
+
+# Part XII: Document extraction
+
+Two Azure services turn documents (and, for Content Understanding, other modalities) into structured data. Both follow the **same async poller pattern** and offer **prebuilt** and **custom** options.
+
+## 56. The two services and their analyzers
 
 | Service | SDK / client | What it does | Modalities |
 |---|---|---|---|
-| **Document Intelligence** | `azure-ai-documentintelligence` → `DocumentIntelligenceClient` | OCR plus **structured field extraction** from documents (key-value pairs, tables, selection marks). | Documents and images. |
-| **Content Understanding** | `azure-ai-contentunderstanding` → `ContentUnderstandingClient` | Newer **multimodal** extraction and understanding; can also generate fields with a backing model. | Documents, images, audio, and video. |
+| **Document Intelligence** | `azure-ai-documentintelligence` → `DocumentIntelligenceClient` | OCR plus **structured field extraction** (key-value pairs, tables, selection marks). | Documents and images. |
+| **Content Understanding** | `azure-ai-contentunderstanding` → `ContentUnderstandingClient` | Newer **multimodal** extraction/understanding; can generate fields with a backing model and **markdown/structured** output. | Documents, images, audio, video. |
 
-### Prebuilt vs custom
+**Prebuilt vs custom:**
 
-- **Prebuilt** = ready to use, **no training required**. You just pass the analyzer/model id.
-  - Common ids: `prebuilt-read` (raw text/OCR), `prebuilt-layout` (text + **tables + structure**), `prebuilt-invoice`, `prebuilt-receipt`, `prebuilt-idDocument`, `prebuilt-businessCard`, `prebuilt-tax.*`.
-  - `prebuilt-read` → just the words. `prebuilt-layout` → words **plus** document structure. Domain analyzers (`invoice`, `receipt`, …) → **named fields** like total, vendor, date.
-- **Custom** = you **train on your own labelled documents** and call it by a custom id.
-  - Document Intelligence: `model_id="doc-intel-custom"`.
-  - Content Understanding: a custom `analyzer_id`.
-
-### The two call shapes
+- **Prebuilt = ready to use, no training.** Common ids: `prebuilt-read` (raw text/OCR), `prebuilt-layout` (text + **tables + structure**), `prebuilt-invoice`, `prebuilt-receipt`, `prebuilt-idDocument`, `prebuilt-businessCard`, `prebuilt-tax.*`. `prebuilt-read` → just words; `prebuilt-layout` → words **plus** structure; domain analyzers → **named fields** (total, vendor, date).
+- **Custom = trained on your own labelled documents**, called by a custom id (Document Intelligence `model_id`; Content Understanding `analyzer_id`).
 
 ```python
-# Document Intelligence — begin_analyze_document(model_id=, body=AnalyzeDocumentRequest(...))
+# Document Intelligence
 poller = client.begin_analyze_document(
     model_id="prebuilt-invoice",
     body=AnalyzeDocumentRequest(bytes_source=document_bytes),  # or url_source=
 )
 
-# Content Understanding — begin_analyze(analyzer_id=, inputs=[AnalysisInput(...)])
+# Content Understanding
 poller = client.begin_analyze(
     analyzer_id="prebuilt-read",
     inputs=[AnalysisInput(url=file_url)],  # or data=bytes, name=, mime_type=
 )
 ```
 
-## 35. The poller and the result
+## 57. The poller and the result
 
-Both `begin_analyze_document` and `begin_analyze` are **long-running operations (LROs)**. They don't return the answer directly:
+Both `begin_analyze_document` and `begin_analyze` are **long-running operations (LROs)**:
 
 ```text
-begin_analyze(...)         # kicks off the job, returns immediately
-      -> poller            # a handle to the running operation
-poller.result()            # BLOCKS until finished, returns the typed result
+begin_analyze(...)   # kicks off the job, returns immediately
+      -> poller      # handle to the running operation
+poller.result()      # BLOCKS until finished, returns the typed result
 ```
 
-- The **poller** lets you wait (`.result()`), or check status, without re-sending the request. It is Azure's standard async pattern for work that takes time.
-- The **result** is a typed object:
-  - Document Intelligence → `AnalyzeResult` with `result.documents`, each having `doc_type`, `confidence`, and `fields` (each field has `type`, `content`/`value_string`, and `confidence`).
-  - Content Understanding → `AnalysisResult` with the extracted content/fields.
-- **Confidence scores** on fields let you route low-confidence extractions to human review.
+- **Document Intelligence** → `AnalyzeResult` with `result.documents` (`doc_type`, `confidence`, `fields` where each field has `type`, `content`/`value_string`, `confidence`).
+- **Content Understanding** → `AnalysisResult` with extracted content/fields, usable for **clean, grounded representations** for agents and RAG.
+- **Confidence scores** let you route low-confidence extractions to human review.
 
-### Exam-relevant facts
-
-- **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named business fields.
-- Analysis is **asynchronous**: `begin_*` returns a **poller**, `poller.result()` returns the typed **result**.
-- **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** (also audio/video) and is the newer service.
-- Fields carry **confidence** — use it for human-in-the-loop review thresholds.
+> Facts: **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named fields. Analysis is **async** (poller → result). **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** and newer.
 
 ---
 
-# Part XI: Azure AI Search
+# Part XIII: Azure AI Search and grounding
 
-## 36. What it is and the purpose it serves
+## 58. What it is and the purpose it serves
 
-**Azure AI Search** is a **search-as-a-service**. You load your content into it once, and it serves fast queries over that content — keyword, filtered, vector, and semantic. It is the **retrieval engine** behind most RAG systems: the "R" that finds the right documents before a model answers (see §14).
+**Azure AI Search** is a **search-as-a-service**. You load your content once, and it serves fast queries — keyword, filtered, vector, and semantic. It is the **retrieval engine** behind most RAG systems: the "R" that finds the right documents before a model answers (§34).
 
 ```text
 Your content (blobs, DBs, files)
@@ -846,54 +936,35 @@ Your content (blobs, DBs, files)
 
 Purpose in one line: **make heterogeneous content searchable and retrievable**, so apps can find information and LLMs can be grounded on it.
 
-## 37. The components
+## 59. The components
 
 | Component | In plain words |
 |---|---|
-| **Data source** | The connection to where your content lives (e.g. Blob Storage, SQL, Cosmos DB). |
-| **Indexer** | The **crawler/automation**. It pulls documents from the data source, runs them through the skillset, and pushes the results into the index — on a schedule or on demand. |
-| **Skillset** | The **AI-enrichment pipeline** applied *during indexing*: OCR, key-phrase extraction, entity recognition (persons/locations/organizations), **sentiment**, image analysis, embeddings, and **custom skills**. Turns raw content into extra searchable fields. |
-| **Index** | The **searchable store + schema**. Defines fields and their attributes, and holds the enriched documents you actually query. |
+| **Data source** | Connection to where content lives (Blob Storage, SQL, Cosmos DB). |
+| **Indexer** | The **crawler/automation**: pulls documents, runs the skillset, pushes results into the index — on a schedule or on demand. |
+| **Skillset** | The **AI-enrichment pipeline** during indexing: OCR, key-phrase extraction, entity recognition, **sentiment**, image analysis, embeddings, and **custom skills**. |
+| **Index** | The **searchable store + schema**: fields, their attributes, and the enriched documents you query. |
 
-### Field attributes (on the index)
-
-Each field is configured with what it's allowed to do:
-
-- **searchable** — can be full-text searched.
-- **retrievable** — can be returned in results.
-- **filterable** — can be used in `$filter` (e.g. `sentiment eq 'positive'`).
-- **sortable / facetable** — can order results / power facet navigation.
+**Field attributes:** **searchable** (full-text), **retrievable** (returned), **filterable** (`$filter`), **sortable / facetable**.
 
 ```text
 Data source -> Indexer -> Skillset (enrich) -> Index (query this)
 ```
 
-## 38. Query types and the semantic reranker
+## 60. Query types and the semantic reranker
 
-### First: keyword vs semantic, and what BM25 is
-
-- **Keyword search (lexical)** matches the **actual words** in the query against the words in the index. If the words don't overlap, it won't match — "car" will not find a document that only says "automobile".
-- **BM25** (Best Matching 25) is the **ranking algorithm** that scores those keyword matches. It's the classic, maths-based formula behind the default **`@search.score`**. Roughly, a document scores higher when:
-  - the query term appears **more often** in it (term frequency), but with **diminishing returns**;
-  - the term is **rare across the whole index** (a distinctive word counts more than a common one);
-  - the document is **not unusually long** (length normalisation stops long docs winning just by size).
-  - BM25 understands **nothing about meaning** — only word statistics. It's fast and the default for simple/full queries.
-- **Semantic** means ranking by **meaning/intent**, not exact words. Azure AI Search runs a **language model** over the top keyword results to understand what the query and passages *mean*, so "cheap places to stay near the beach" can surface a hotel passage that never uses those exact words. It also powers captions and extractive answers.
-
-> **One-liner:** BM25 = keyword relevance by word statistics (the default `@search.score`). Semantic = a language model re-ranks for meaning (adds `@search.reranker_score`).
-
-### The query types
-
-Set with `query_type` on the search call (or `"queryType"` in the REST body).
+- **Keyword (lexical)** matches the **actual words**; "car" won't find a doc that only says "automobile".
+- **BM25** (Best Matching 25) is the default **keyword ranking** behind **`@search.score`** — scores on term frequency (diminishing), rarity across the index, and length normalisation. It understands **nothing about meaning**.
+- **Semantic** ranks by **meaning/intent**: a language model re-ranks the top keyword results, so "cheap places to stay near the beach" can surface a hotel passage that never uses those words; also powers captions/answers.
 
 | Query type | What it does |
 |---|---|
-| **Simple** (default) | Basic keyword search with light operators. Ranked by **BM25**. Good default. |
-| **Full** (Lucene) | Full **Lucene syntax**: field-scoped (`title:"Dubai Brochure.pdf"`), wildcards (`hote*`), fuzzy (`Dubia~`), boolean. Still keyword/BM25, just richer syntax. |
-| **Semantic** | Takes the top BM25 results and **re-ranks them by meaning** with a language model; can return captions/answers. Requires a **semantic configuration**. |
+| **Simple** (default) | Keyword search with light operators. Ranked by **BM25**. |
+| **Full** (Lucene) | Full **Lucene syntax**: field-scoped (`title:"Dubai Brochure.pdf"`), wildcards (`hote*`), fuzzy (`Dubia~`), boolean. Still keyword/BM25. |
+| **Semantic** | Re-ranks the top BM25 results by meaning; can return captions/answers. Needs a **semantic configuration**. |
 | **Vector / hybrid** | Embeddings **similarity** search (meaning via vectors), optionally combined with keyword (hybrid) for best recall + precision. |
 
-Filters (OData `$filter`) are **independent** of query type — they work on `filterable` fields with any mode:
+Filters (OData `$filter`) are **independent** of query type and work on `filterable` fields:
 
 ```python
 results = search_client.search(
@@ -904,162 +975,72 @@ results = search_client.search(
 )
 ```
 
-### The semantic reranker score
+**Semantic reranker score:** with `query_type="semantic"`, a second deep-learning reranker reorders results and returns **`@search.reranker_score`** on a **fixed 0–4 scale**. This differs from **`@search.score`** (BM25), which is **unbounded** and only comparable within one query's results.
 
-When `query_type="semantic"`, a second **deep-learning reranker** reorders the first-stage results by semantic relevance to the query:
+## 61. Foundry IQ — RAG as a managed knowledge base
 
-- It returns **`@search.reranker_score`**, on a **fixed 0–4 scale** (higher = more relevant).
-- This is **different** from the default **`@search.score`** (BM25 keyword relevance), which is **not** 0–4: BM25 is an **unbounded** positive number (0 and up) that is only meaningful *relative to other results in the same query* — you can't compare it across queries.
-- Two-stage model: keyword/vector retrieval finds candidates → semantic reranker reorders the top of that list.
-
-```python
-for result in results:
-    print("Reranker score:", result['@search.reranker_score'])  # 0–4, semantic
-```
-
-### Exam-relevant facts
-
-- **Indexer = ingestion automation; Skillset = AI enrichment; Index = what you query.** Don't mix them up.
-- A field must be **filterable** to use it in `$filter`, **retrievable** to return it, **searchable** to full-text search it.
-- **Simple vs Full**: Full enables Lucene syntax (fields, wildcards `*`, fuzzy `~`, boolean).
-- **BM25** is the default **keyword** ranking algorithm (word statistics: term frequency + rarity + length), producing **`@search.score`**. It ignores meaning. The score is **unbounded** (not 0–4) and only comparable within one query's results.
-- **Semantic** ranks by **meaning** with a language model; it needs a semantic configuration and adds **`@search.reranker_score`** on a **fixed 0–4 scale**, separate from the unbounded BM25 **`@search.score`**.
-- AI Search is the **retrieval** layer for RAG; groundedness/retrieval evaluators (§14) measure how well that retrieval feeds the model.
-
-## 38b. Foundry IQ — RAG as a managed knowledge base
-
-**Foundry IQ** is a managed **knowledge base** in Foundry that packages the whole RAG retrieval pipeline so you don't have to wire it up yourself. It is **built on Azure AI Search** (§36–38) and turns retrieval + grounding into a single thing an agent can call.
+**Foundry IQ** is a managed **knowledge base** in Foundry that packages the whole RAG retrieval pipeline. It is **built on Azure AI Search** and turns retrieval + grounding into a single thing an agent can call.
 
 ```text
 Knowledge sources (Blob, SharePoint, …)
-   -> Foundry IQ knowledge base  (built on Azure AI Search: indexing, vector + semantic retrieval)
+   -> Foundry IQ knowledge base  (Azure AI Search: indexing, vector + semantic retrieval)
    -> exposed as an MCP tool  (knowledge_base_retrieve)
    -> Foundry agent calls it to ground answers with citations
 ```
 
-**How it builds on AI Search and RAG:**
+- **It is AI Search underneath** — but you configure a **knowledge base** instead of hand-building indexer, skillset, index, and query code.
+- **Multiple sources, one base:** **Blob Storage** (indexed) and **SharePoint** (connected as a **remote source** — retrieved **without re-indexing**, respecting **Microsoft Purview** governance).
+- **Agentic retrieval:** plans/decomposes a complex question across sources, returning grounded passages **with source URLs**.
+- **Consumed as a tool, not plumbing:** surfaced to the agent via an **MCP tool** (`knowledge_base_retrieve`).
 
-- **It is AI Search underneath.** Foundry IQ uses Azure AI Search for indexing and for vector + semantic retrieval — but you configure a **knowledge base** instead of hand-building indexer, skillset, index, and query code.
-- **Multiple knowledge sources, one base.** You attach sources like **Blob Storage** (indexed into AI Search) and **SharePoint** (connected as a **remote source** — retrieved **without re-indexing**, respecting **Microsoft Purview** governance/compliance).
-- **Agentic retrieval.** Rather than one query, it can plan and decompose a complex question across sources, then return grounded passages **with source URLs** for citation.
-- **Consumed as a tool, not plumbing.** The knowledge base is surfaced to the agent through an **MCP tool** (`knowledge_base_retrieve`). The agent just calls the tool; Foundry IQ does the retrieval and hands back grounded results.
-
-> One line: **AI Search = the retrieval engine; Foundry IQ = a managed, multi-source RAG knowledge base built on that engine, handed to agents as an MCP tool.** It is the same RAG idea (§14) — find documents, then ground the answer — but packaged so you connect sources instead of building the pipeline.
+> One line: **AI Search = the retrieval engine; Foundry IQ = a managed, multi-source RAG knowledge base built on it, handed to agents as an MCP tool.**
 
 ---
 
-# Part XII: Red teaming
+# Part XIV: High-value summary
 
-**Red teaming = you attack your own AI on purpose** to find safety problems **before** real users or real attackers do. Think of it like a fire drill: you start a (safe) fire to check the alarms actually go off. It is *testing*, not a live block.
+## 62. Facts to remember
 
-## 39. AI Red Teaming Agent
+1. Choose the **smallest model that meets quality**; match **modality** to the task; prefer a **Foundry Tool** for well-defined tasks.
+2. Deployment type combines **processing scope** (Global/Data Zone/geography) with **capacity/billing** (Standard/Provisioned/Batch). Start with **Global Standard**.
+3. **Standard TPM** quota and **Provisioned PTU** quota are **separate buckets**; over-limit → **429**.
+4. **Version upgrade policy:** `OnceNewDefaultVersionAvailable` (auto, default), `OnceCurrentVersionExpired`, `NoAutoUpgrade` (pinned). Auto-upgrade can change behaviour (re-evaluate); fine-tunes are pinned to their base.
+5. Prefer **keyless (Entra ID) auth** with **managed identity** + `DefaultAzureCredential`; disable local auth; use **private endpoints** and **least-privilege RBAC**.
+6. Monitor **operational** (latency, tokens, 429, errors) and **quality/safety** (groundedness, drift, safety events, index health).
+7. `AIProjectClient` = **control plane**; `get_openai_client()` = **data plane** inference; `AzureOpenAI` = project-less direct inference.
+8. `agents.create_version` **defines** an agent (durable); `responses.create` **runs** a turn; `conversations.create` **holds** state (memory); `chat.completions.create` is stateless (`.parse` = typed output).
+9. Shape behaviour first with **prompting + parameters** (low `temperature` for factual, `max_tokens` for length/cost, structured outputs) before fine-tuning.
+10. Agents add **tools, knowledge, memory, and autonomy**; guard consequential tools with schemas, approvals, and limits.
+11. In **A2A**, the **Agent Card** (+ **Skills**) advertises/discovers; the **Executor** implements; the **Request Handler** + task store manage the task; the **Server** serves it over HTTP.
+12. **RAI** has **six principles** (**Transparency** & **Accountability** overarching). Guardrails/evaluations/red teaming are *implementations* of RAI, not RAI itself.
+13. Guardrail control = **risk + intervention point + action**. Models protect **input/output**; agents can also protect **tool calls/responses**.
+14. **Annotate** labels and continues; **annotate and block** stops. Agent policies **override** (not merge with) model policies. Default model policy = **Microsoft.DefaultV2**; omitting hosted-agent `rai_config` = no platform guardrail.
+15. **Groundedness** = supported by the supplied docs (not universal truth); **Relevance** = answers the question; **Correctness** = actually true.
+16. Evaluate both the **final outcome** and the **tool-use process**; thresholds can gate CI/CD (automation must enforce).
+17. **Red teaming** = proactive attack testing (**PyRIT**); probes the four safety filters at rising difficulty (Base64/Morse/ROT13/flip/leetspeak = encode; jailbreak = argue) and reports **Attack Success Rate (ASR)** — lower is safer.
+18. Fine-tuning: **SFT** (desired responses), **RFT** (grader scores), **DPO** (preferred vs rejected), **FFT** (tool calls), **VFT** (images).
+19. **Computer vision:** text-to-image/video generation; **mask-based inpainting** edits; multimodal **captioning/visual QA/alt-text/object detection**; Content Understanding **single-task vs pro**; visual safety filters, **image prompt-injection**, watermarks/brand rules.
+20. **Text analysis:** NER, key phrases, **sentiment/tone**, PII, summarization, custom classification — via Language service or **LLM structured JSON**; **Translator** vs LLM translation.
+21. **Speech:** **STT + TTS** make speech an agent modality; **custom speech**, **speech translation**, and **audio-native** multimodal models.
+22. Document analysis is **async** (poller → result). **Prebuilt = no training; custom = trained.** `prebuilt-read` = OCR; `prebuilt-layout` = +tables/structure; domain analyzers = named fields. **Content Understanding** is multimodal and newer.
+23. Azure AI Search: **Indexer** = ingestion, **Skillset** = enrichment, **Index** = what you query. Field needs **filterable**/`$filter`, **retrievable**/return, **searchable**/full-text. Query types: **simple/full/semantic/vector-hybrid**; semantic adds **`@search.reranker_score`** (0–4) vs unbounded BM25 **`@search.score`**.
+24. **Foundry IQ** = a managed, multi-source **RAG knowledge base built on Azure AI Search**, connected to sources (Blob, SharePoint-as-remote-source) and handed to agents as an **MCP tool** (`knowledge_base_retrieve`).
 
-Foundry's **AI Red Teaming Agent** does the attacking for you automatically. Under the hood it uses **PyRIT** (Python Risk Identification Tool — Microsoft's free open-source red-teaming tool).
+## 63. Recommended study order
 
-- **When to run it:** before you deploy, and again after big changes. It's a safety check, like evaluations.
-- **What it does:** it sends lots of "bad" prompts to your AI, then uses Content Safety to grade whether the answer that came back was actually harmful.
-- **What you can point it at:** a deployed model, a function, or an agent.
-
-### The filters it tests (and what each one catches)
-
-A **filter** is the AI's safety gate: it is meant to spot and stop harmful content. Red teaming checks whether each of these common filters actually holds up under attack:
-
-| Filter (risk category) | What it is meant to catch |
-|---|---|
-| **Hate & unfairness** | Hateful, insulting, discriminatory, or biased content about people or groups (race, gender, religion, etc.). |
-| **Violence** | Content that describes, threatens, or encourages physical harm, weapons, or gore. |
-| **Sexual** | Explicit or inappropriate sexual content. |
-| **Self-harm** | Content about hurting oneself or suicide, or encouraging it. |
-
-These are the same four content-safety categories used by guardrails and the safety evaluators. A separate filter, **Prompt Shields**, catches *jailbreak* / prompt-injection attempts — tricks that try to make the AI ignore its own rules.
-
-### How hard it tries (attack difficulty)
-
-It first asks the bad question plainly, then **disguises** it so the filter might not recognise the harmful words. Harder levels use sneakier disguises.
-
-| Level | What it means |
-|---|---|
-| **Baseline** | The plain harmful question, no tricks. |
-| **Easy → Moderate → Difficult** | The same question hidden with one or more of the techniques below. More/stronger disguises = harder level. |
-
-### The disguise techniques (attack strategies)
-
-These are the tricks the agent uses to try to smuggle a harmful request past the filter. The idea is always the same: **the meaning stays harmful, but the surface text looks innocent**, so a filter that only scans for bad words might miss it.
-
-| Technique | What it does | Tiny example of "hello" |
-|---|---|---|
-| **Base64** | Encodes the text into a letters/numbers string; the model can decode it but the filter sees gibberish. | `aGVsbG8=` |
-| **Morse code** | Replaces letters with dots and dashes. | `.... . .-.. .-.. ---` |
-| **ROT13 / Caesar** | Shifts every letter a fixed number of steps in the alphabet. | `uryyb` (shift 13) |
-| **Character flip / swap** | Reverses or scrambles the letters. | `olleh` |
-| **Unicode / leetspeak** | Swaps letters for look-alike symbols or numbers. | `h3ll0` |
-| **Jailbreak prompt** | Doesn't encode text — instead *talks the model out of its rules* ("ignore your instructions", "pretend you are an AI with no limits", role-play tricks). This is the **prompt-injection** family that **Prompt Shields** is meant to stop. |
-
-> **Key idea:** Base64, Morse, ROT13, flipping, leetspeak = **hide the words**. Jailbreak = **argue the model into breaking its rules**. Red teaming throws all of these at your AI to see which ones get through.
-
-### The one score that matters — Attack Success Rate (ASR)
-
-- ASR = **out of all the attacks, how many got a harmful answer through.**
-- **Lower = safer.** (0% means nothing got past the filters.)
-- You get it as a **scorecard**: broken down by filter (harm category) and by difficulty, so you can see *which* filter leaked and *how clever* the attack had to be.
-
-### Exam-relevant facts
-
-- Red teaming **finds** weaknesses (testing); **filters/guardrails block** them at runtime. Different jobs — don't mix them up.
-- The filters tested are **hate & unfairness, violence, sexual, self-harm**; **Prompt Shields** handles jailbreak / prompt injection.
-- The AI Red Teaming Agent runs on **PyRIT**.
-- The key metric is **Attack Success Rate (ASR)** — **lower is better**.
-- Two families of disguise: **encode the words** (Base64, Morse, ROT13, flipping, leetspeak) and **jailbreak** (argue the model out of its rules — the prompt-injection family **Prompt Shields** targets).
-
----
-
-# Part XIII: High-value summary
-
-## 40. Facts to remember
-
-1. Guardrail control = **risk + intervention point + action**.
-2. Models normally protect **input and output**.
-3. Agents can additionally protect **tool calls and tool responses**.
-4. **Annotate** labels and continues; **annotate and block** labels and stops.
-5. Agent policies can **override**, rather than merge with, model policies.
-6. The default model policy is **Microsoft.DefaultV2**.
-7. Hosted agents need special attention: omitting `rai_config` can mean no platform content-safety policy.
-8. Guardrails intervene at runtime; evaluations measure behaviour.
-9. Groundedness measures support from supplied context, not universal truth.
-10. Hate and Unfairness is the main built-in fairness-style content evaluator; decision fairness needs custom testing.
-11. Evaluate both the final agent outcome and its tool-use process.
-12. Deployment names combine **processing scope** with **capacity/billing**.
-13. Start with Global Standard unless residency, reserved throughput, or batch processing requires another type.
-14. Responsible AI has **six principles**; **Transparency** and **Accountability** are overarching. Guardrails and evaluations are *implementations* of RAI, not RAI itself.
-15. `AIProjectClient` = **control plane** (agents, connections, eval); `get_openai_client()` = **data plane** inference; `AzureOpenAI` = project-less direct inference.
-16. `agents.create_version` **defines** an agent (durable); `responses.create` **runs** a turn; `conversations.create` **holds** state; `chat.completions.create` is stateless (`.parse` = typed output).
-17. In A2A, the **Agent Card** (with its **Skills**) advertises/discovers the agent; the **Executor** implements behaviour; the **Request Handler** + task store manage the task; the **Server** serves it over HTTP.
-18. Document analysis is **async**: `begin_*` returns a **poller**, `poller.result()` returns the typed result. **Prebuilt** needs no training; **custom** is trained on your documents.
-19. `prebuilt-read` = OCR text only; `prebuilt-layout` = adds tables/structure; domain analyzers (`invoice`, `receipt`) = named fields. **Content Understanding** is multimodal (adds audio/video); **Document Intelligence** is document/image focused.
-20. In Azure AI Search: **Indexer** = ingestion automation, **Skillset** = AI enrichment, **Index** = what you query. A field needs **filterable** for `$filter`, **retrievable** to return, **searchable** to full-text search.
-21. Search query types: **simple** (default), **full** (Lucene: fields, `*`, `~`, boolean), **semantic** (reranks for meaning), **vector/hybrid**. Semantic adds **`@search.reranker_score`** (0–4), separate from BM25 **`@search.score`**.
-22. **Red teaming** = proactive attack testing (built on **PyRIT**); it probes the **hate/unfairness, violence, sexual, self-harm** filters at rising difficulty and reports **Attack Success Rate (ASR)** — lower is safer.
-23. **Version upgrade policy**: `OnceNewDefaultVersionAvailable` (auto, default), `OnceCurrentVersionExpired` (upgrade only at retirement), `NoAutoUpgrade` (pinned). Auto-upgrade can change agent behaviour (re-evaluate); fine-tunes are pinned to their base version.
-24. **RAG** grounds on **text**; **multimodal RAG** grounds on **text + images/visual content** (multimodal embeddings + Document Intelligence/Content Understanding + a multimodal model).
-25. **Foundry IQ** = a managed, multi-source **RAG knowledge base built on Azure AI Search**; it connects sources (Blob, SharePoint-as-remote-source) and is handed to agents as an **MCP tool** (`knowledge_base_retrieve`) that returns grounded results with citations.
-
-## 41. Recommended study order
-
-1. Guardrail concepts and intervention points.
-2. Default, inherited, and overridden policies.
-3. Annotate versus block using agent examples.
-4. Agent development lifecycle and runtime tool loop.
-5. Groundedness, relevance, retrieval, coherence, and fluency.
-6. Agent task and tool-use evaluators.
-7. Global, Data Zone, geography, Standard, Provisioned, and Batch deployments.
-8. Responsible AI principles and how guardrails/evaluations implement them.
-9. Foundry SDK clients: `AIProjectClient` vs `get_openai_client()` vs `AzureOpenAI`.
-10. Inference APIs: responses, conversations, chat.completions/.parse, agents.create_version.
-11. A2A anatomy: skill, agent card, executor, request handler, server.
-12. Document Intelligence vs Content Understanding: prebuilt/custom, poller and result.
-13. Azure AI Search: indexer, skillset, index, query types, and the semantic reranker score; and **Foundry IQ** as a managed RAG knowledge base built on it.
-14. Red teaming: the AI Red Teaming Agent (PyRIT), the filters it tests, attack difficulty levels, and the ASR score.
-15. Model version upgrade policy and its effect on agents and fine-tunes; RAG vs multimodal RAG.
+1. Foundations: model selection (LLM/SLM/multimodal/reasoning) and choosing the right Foundry capability.
+2. Deployment types, quota (TPM vs PTU), and version upgrade policy.
+3. Security & ops: keyless/managed-identity auth, private networking, RBAC, CI/CD, monitoring.
+4. Foundry SDK clients: `AIProjectClient` vs `get_openai_client()` vs `AzureOpenAI`.
+5. Inference APIs (responses/conversations/chat.completions/.parse/agents.create_version) and prompt engineering + parameters.
+6. Agents: lifecycle, runtime loop, tools/knowledge/memory, multi-agent orchestration and A2A.
+7. Responsible AI principles; guardrails and intervention points; annotate vs block; custom-policy scenarios.
+8. Evaluations: quality, RAG/groundedness, fairness/safety, agent task & tool-use; across the lifecycle.
+9. Red teaming: AI Red Teaming Agent (PyRIT), filters, attack techniques, ASR.
+10. Fine-tuning: SFT, RFT, DPO, FFT, VFT.
+11. Computer vision: image/video generation & editing, multimodal understanding, Content Understanding, visual RAI.
+12. Text analysis & speech: Language service, Translator, STT/TTS, custom/translated speech.
+13. Information extraction: Document Intelligence vs Content Understanding; Azure AI Search and Foundry IQ.
 
 ---
 
@@ -1098,3 +1079,14 @@ These are the tricks the agent uses to try to smuggle a harmful request past the
 - [Skillset concepts (AI enrichment)](https://learn.microsoft.com/en-us/azure/search/cognitive-search-working-with-skillsets)
 - [Query types and composition](https://learn.microsoft.com/en-us/azure/search/search-query-overview)
 - [Semantic ranking and reranker score](https://learn.microsoft.com/en-us/azure/search/semantic-search-overview)
+- [Exam AI-103 study guide](https://aka.ms/AI103-StudyGuide)
+- [Authenticate to Azure AI services with Microsoft Entra ID](https://learn.microsoft.com/en-us/azure/ai-services/authentication)
+- [Managed identities for Azure resources](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview)
+- [Azure RBAC for Azure AI services](https://learn.microsoft.com/en-us/azure/ai-services/security-controls-policy)
+- [Configure private endpoints for Azure AI services](https://learn.microsoft.com/en-us/azure/ai-services/cognitive-services-virtual-networks)
+- [How to generate images with Azure OpenAI](https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/dall-e)
+- [Azure AI Content Understanding overview](https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/overview)
+- [Azure AI Vision Image Analysis](https://learn.microsoft.com/en-us/azure/ai-services/computer-vision/overview-image-analysis)
+- [Azure AI Language service overview](https://learn.microsoft.com/en-us/azure/ai-services/language-service/overview)
+- [Azure AI Translator overview](https://learn.microsoft.com/en-us/azure/ai-services/translator/translator-overview)
+- [Azure AI Speech service overview](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/overview)
