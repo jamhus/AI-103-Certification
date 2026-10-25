@@ -161,6 +161,24 @@ Your limit is a **TPM quota** (Tokens Per Minute), granted per **subscription + 
 
 **Good for:** low, spiky, or unpredictable traffic — you only pay for what you use.
 
+## 9a. Handling 429: retry with exponential backoff and jitter
+
+A **429 (Too Many Requests)** means you hit a rate limit (TPM/RPM quota, or shared-capacity pressure). The fix is a **retry strategy**, not more immediate calls.
+
+- **Exponential backoff:** wait progressively longer between retries (e.g. 1s → 2s → 4s → 8s), capped at a max.
+- **Jitter:** add a small **random** offset to each wait so many clients don't retry at the exact same instant.
+- **Respect `Retry-After`:** if the response carries a `Retry-After` header, wait at least that long.
+
+**Why not retry immediately?** Immediate retries pile more load onto an already-throttled endpoint and just earn more 429s. **Why jitter?** Without it, all throttled clients retry in lockstep, creating **retry storms** (synchronized spikes) that re-trigger throttling.
+
+**Exam clues → answer:**
+
+- "requests fail with **429** / rate limited" → **retry with exponential backoff**.
+- "many clients retry at once / thundering herd / retry storm" → **add jitter**.
+- "need to **avoid 429 entirely / guaranteed throughput**" → **Provisioned (PTU)** (§10) or raise quota.
+
+**Distractors:** retry instantly, retry on a fixed short delay, or raise `max_tokens` — none address rate limiting.
+
 ## 10. Provisioned (PTU) and how it works
 
 A **PTU (Provisioned Throughput Unit)** is a block of **reserved throughput** you buy for a model — guaranteed tokens/min that are yours alone, not shared.
@@ -247,6 +265,27 @@ Access is granted with **Azure RBAC** at subscription/resource-group/resource sc
 
 Give the app's **managed identity** the specific data-plane roles it needs (e.g. *Cognitive Services User* + *Search Index Data Reader*), not broad management roles.
 
+## 14a. RBAC quick reference: create vs configure vs deploy vs manage access
+
+Pick the **least-privileged** role that covers the exact verb in the scenario.
+
+| Role | Create/manage resources | Configure/deploy | Data plane (inference) | Assign roles (manage RBAC) |
+|---|:--:|:--:|:--:|:--:|
+| **Owner** | ✅ | ✅ | ✅ | ✅ |
+| **Contributor** | ✅ | ✅ | ✅ | ❌ |
+| **Cognitive Services Contributor** | ✅ (AI Services) | ✅ | ✅ | ❌ |
+| **Cognitive Services User** | ❌ | ❌ | ✅ | ❌ |
+| **Azure AI Developer** | ❌ | build/run in a project | ✅ | ❌ |
+
+**Decision rules:**
+
+- "**create / provision / configure / deploy** a resource" → **Contributor** (or *Cognitive Services Contributor* for AI Services).
+- "**call the model / analyse text / use the endpoint**" (data plane only) → **Cognitive Services User**.
+- "**assign roles / grant others access / manage RBAC**" → **Owner** (or *User Access Administrator*).
+- The phrase "**least privilege**" is usually the deciding clue — never pick Owner when a narrower role fits.
+
+**Trap:** Owner and Contributor both manage resources, but **only Owner can assign roles**. A management role (Contributor) does **not** imply the ability to grant access.
+
 ## 15. CI/CD for Foundry projects
 
 - Keep agent definitions, prompts, infra (Bicep/Terraform), and eval datasets in **source control**.
@@ -263,6 +302,32 @@ Watch two layers in production:
 - **Retrieval health (for RAG):** data-ingestion quality, **search index health**, and relevance performance.
 
 Implement it with **tracing** (per-call timings, dependencies, tool steps), telemetry to **Application Insights / Azure Monitor**, and **continuous/online evaluation** on sampled production traffic. Re-evaluate after changing the model, instructions, tools, data, retrieval, or guardrails.
+
+## 16a. Token usage vs evaluation (cost vs quality)
+
+Two concerns that look similar in scenarios but need different answers:
+
+| The scenario is about… | It's a… | Measure with |
+|---|---|---|
+| **Rising cost, bill, spend, capacity, 429s** | **Token usage** metric | token counts / cost telemetry (monitoring) |
+| **Is the answer good, correct, grounded, relevant** | **Evaluation** | evaluators (§33–38) |
+
+**Decision rules:**
+
+- "costs are **increasing** / reduce spend / too many tokens / hitting quota" → **token usage** (operational metric).
+- "answers are **wrong / ungrounded / low quality / hallucinating**" → **evaluation** (quality/groundedness).
+
+**Trap:** an evaluator does **not** measure cost, and a token counter does **not** measure quality. Match the metric to whether the concern is **money/throughput** (tokens) or **answer goodness** (evaluation).
+
+## 16b. Tracing and content recording (`enable_content_recording`)
+
+Tracing normally records **metadata** (timings, spans, token counts, tool names) but **not** the message content. Turning on **content recording** captures the actual payloads.
+
+- `enable_content_recording=true` (OpenTelemetry / agent tracing) records **prompts, model responses, and tool-call inputs/outputs** into the traces.
+- **Use it for:** debugging, quality analysis, and building evaluation datasets from real traffic.
+- **Compliance implication:** recorded prompts/responses/tool payloads may contain **PII or sensitive data**, so it is governed by privacy/data-handling policy — enable deliberately, restrict access, and apply retention/redaction. Many orgs keep it **off by default in production**.
+
+**Exam clue:** "capture the **actual prompts and responses** for debugging/evaluation" → **enable content recording**; "but beware **sensitive data**" → the compliance caveat.
 
 ---
 
@@ -435,6 +500,75 @@ Agents become useful by calling **tools** and **knowledge**:
 - **APIs / OpenAPI tools:** call external services.
 
 Apply **least privilege**: connect only the tools required, and guard consequential ones with schemas, validation, approvals, and limits (Part VII).
+
+## 24a. Tool choice: `auto` vs `required` vs `none`
+
+`tool_choice` controls **whether the model may, must, or can't call a tool** on a turn.
+
+| Value | Meaning | Use when |
+|---|---|---|
+| **`auto`** (default) | Model decides whether to call a tool or answer directly. | Normal behaviour — tools used only when helpful. |
+| **`required`** | Model **must** call a tool (at least one) before answering. | The answer must **always** come from a tool/knowledge source. |
+| **`none`** | Model **may not** call any tool; answers from the model only. | Force a plain completion / disable tools this turn. |
+
+**Exam clues → `required`:** "must **always** search", "must **always** retrieve", "must **always** provide citations", "must **always** use the knowledge source", "every answer must be grounded in the tool". Any **always / every** + tool/search/citation → **`required`**.
+
+**Clues → `none`:** "do **not** use tools", "answer without calling functions". **Clues → `auto`:** "use the tool **when needed / if relevant**".
+
+**Distractors:** writing "always search" in the **instructions** does **not** guarantee a tool call — only `tool_choice="required"` enforces it. Don't confuse with `require_approval` (that gates **execution**, not whether the model calls the tool).
+
+## 24b. File Search vs Azure AI Search
+
+Both retrieve content, but they target different scales:
+
+| Clue in the scenario | Use |
+|---|---|
+| Files **uploaded into the conversation/agent**, ad-hoc documents, "attach these files", a small set | **File Search** (the agent's built-in file tool) |
+| **Enterprise/organisational document collection**, indexed corpus, millions of docs, reused across apps, needs vector/semantic/hybrid + filters | **Azure AI Search** (§58) |
+
+**Decision rules:**
+
+- "user **uploads** a few files to ask about" / "files added to the agent" → **File Search**.
+- "search our **knowledge base / document library / indexed collection**" → **Azure AI Search**.
+
+**Trap:** don't reach for Azure AI Search just because the word "search" appears. Uploaded, conversation-scoped files are **File Search**; a managed, pre-indexed enterprise corpus is **Azure AI Search**.
+
+## 24c. Connections: how tools get credentials
+
+A **Connection** is a stored, reusable link to an external resource (Azure AI Search, Storage, an API, another AI service) **that holds the credentials** (key, managed identity, or token config) in the Foundry project — not in your code.
+
+```text
+Connection (stores credentials)  ->  Tool (references the connection)  ->  Agent (uses the tool)
+```
+
+- **Credentials live in the Connection**, centrally managed and reusable across tools/agents.
+- A **Tool** consumes a Connection to reach its backend; the **Agent** calls the Tool.
+- At runtime the tool authenticates **via the connection** — you never paste keys into the agent or the request.
+
+**Exam clues → "the tool isn't linked to the connection":**
+
+- "the **API key already exists** / the **connection is already configured**, but the tool still fails to authenticate" → the **tool is not wired to the connection** (fix: attach the connection to the tool) — **not** "add another key".
+- "**authentication header missing**" while a valid connection exists → the tool isn't using the connection.
+
+**Trap:** the fix is rarely "hardcode the key" — if a connection exists, **associate the tool with that connection**.
+
+## 24d. OpenAPI tool authentication (`securitySchemes`)
+
+When you add a REST API as an **OpenAPI tool**, auth is declared in the spec's **`securitySchemes`** and supplied through a **connection** — never hardcoded.
+
+| `securityScheme` type | Use when the API expects… |
+|---|---|
+| **`apiKey`** | A key in a **header** (or query/cookie), e.g. `Ocp-Apim-Subscription-Key: <key>`. |
+| **`http` (bearer)** | A **Bearer token** in the `Authorization` header. |
+| **`oauth2`** | A full **OAuth 2.0** flow (token obtained from an identity provider, scopes). |
+
+**Decision rules:**
+
+- "API expects an **API key in a header**" → **`apiKey`** scheme (key stored in a connection).
+- "API uses **OAuth 2.0 / token endpoint / scopes**" → **`oauth2`**.
+- "API expects a **Bearer token**" → **`http` bearer**.
+
+**Traps:** do **not** embed the secret in the spec, hardcode the header value, or inject the key via the prompt/instructions. The secret lives in a **connection**; the scheme only tells the tool **where** to put it.
 
 ## 25. Multi-agent orchestration and A2A
 
@@ -793,6 +927,19 @@ Covers the AI-103 computer-vision domain: generating and editing images/video, u
 - **Prompt-driven modifications:** change style, lighting, or content via instructions while keeping the rest.
 - Choose the right control for the job: full generation vs targeted mask edit vs prompt-only edit.
 
+## 47a. Input fidelity (preserving the reference image)
+
+When editing or generating from a **reference image**, `input_fidelity` controls how closely the output must match the original.
+
+| Setting | Effect | Choose when |
+|---|---|---|
+| **High fidelity** | Preserve the reference's appearance, layout, faces, and design closely. | Output **must resemble** the original. |
+| **Low fidelity** | Looser adherence; more creative freedom, cheaper/faster. | A loose reinterpretation is acceptable. |
+
+**Exam clues → high `input_fidelity`:** "must **resemble** the original image", "**preserve** the design / appearance / branding", "stay **faithful to the reference**", "keep the product looking the same". Any *preserve / faithful / resemble* → **high fidelity**.
+
+**Trap:** more prompt detail does **not** guarantee visual fidelity — when the requirement is *look like the reference*, set **`input_fidelity` high**.
+
 ## 48. Video generation and editing
 
 - **Text-to-video:** a video-generation model (e.g. Sora family) produces a short clip from a **text prompt** and optional **reference media**.
@@ -861,6 +1008,18 @@ Two routes: purpose-built **Language service** capabilities, or **generative pro
 - **LLM-powered translation:** an LLM can translate with more context/tone control inside a generative flow.
 - Choose **Translator** for high-volume, well-defined translation; an **LLM** when you need context-aware or integrated-into-a-prompt translation.
 
+## 53a. Mixed-language content (split → translate → recombine)
+
+When a single segment contains **more than one language**, translating the whole blob at once confuses language detection and lowers quality.
+
+**Pattern:** **detect/split by language → translate each part independently → recombine** in order.
+
+**Why it improves quality:** each part is translated with the **correct source language** and context, so the model/Translator doesn't mis-detect the dominant language or mangle the minority-language spans. It also lets you skip or preserve segments already in the target language.
+
+**Exam clues:** "a single sentence/segment **mixes languages**", "document contains **multiple languages**", "quality drops on **mixed-language** input" → **split by language first, translate separately, then recombine**.
+
+**Trap:** sending mixed-language text in one call and trusting auto-detect — detection picks one language and degrades the rest.
+
 ---
 
 # Part XI: Speech
@@ -926,6 +1085,21 @@ poller.result()      # BLOCKS until finished, returns the typed result
 - **Confidence scores** let you route low-confidence extractions to human review.
 
 > Facts: **Prebuilt = no training; custom = trained on your documents.** `prebuilt-read` = OCR only; `prebuilt-layout` = adds tables/structure; domain analyzers = named fields. Analysis is **async** (poller → result). **Document Intelligence** is document/image focused; **Content Understanding** is **multimodal** and newer.
+
+## 57a. Scanned PDFs: OCR + page-aware chunking for RAG
+
+Scanned/image PDFs have **no selectable text**, so you must **OCR** first, then chunk for retrieval.
+
+**Pipeline:** OCR (Document Intelligence `prebuilt-read` / `prebuilt-layout`) → preserve **tables/structure** → **page-aware chunking** → embed → index.
+
+**Decision rules:**
+
+- "**scanned** PDF / image-only / no extractable text" → **OCR first** (`prebuilt-read` for text, `prebuilt-layout` for **tables + structure**).
+- "must cite the **page number** / show **page references** / keep **tables** intact" → **page-aware (page-level) chunking**.
+
+**Why page-aware chunking?** Chunking by page keeps each chunk tied to a real **page number** (so answers can cite "see page 7"), avoids splitting **tables** across chunk boundaries, and preserves layout context — all of which improve grounded, citable answers.
+
+**Trap:** feeding a scanned PDF straight into an embedder yields nothing useful — the text must be **OCR'd** before chunking/indexing.
 
 ---
 

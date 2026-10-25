@@ -465,9 +465,49 @@ For code questions:
 
 ---
 
-# Part VII: Exam traps
+# Part VII: Power Fx expressions (Copilot Studio agents)
 
-## 23. Common traps
+## 23. Power Fx essentials
+
+Copilot Studio agents use **Power Fx** for conditions and text handling. Variables carry a **scope prefix**: `Local.` (topic-local), `Global.`, `System.` — keep it, do not reference a bare variable name.
+
+### Blank vs Empty (the big trap)
+
+```text
+IsBlank(value)   → single text/value: is it blank ("" or null)?
+IsEmpty(table)   → table/collection: does it have zero rows?
+```
+
+- User input is **text** → validate with **`IsBlank`**, never `IsEmpty`.
+- `IsEmpty` on a text value is **wrong** — it only tests tables/collections.
+
+| Need | Expression |
+|---|---|
+| Continue only if the user entered a response (text exists) | `Not(IsBlank(Local.Varx))` |
+| True when the value is blank/empty | `IsBlank(Local.Varx)` |
+| Table/collection has no rows | `IsEmpty(SomeCollection)` |
+
+### Text case
+
+```text
+Upper(text) → UPPERCASE
+Lower(text) → lowercase
+```
+
+- Power Fx uses **`Upper`** / **`Lower`**. There is **no `ToUpper` / `ToLower`** (classic distractor).
+- Keep the prefix: `Upper(Local.Varx)`, not `Upper(Varx)`.
+
+**Traps:**
+
+- `IsEmpty` for a text value → wrong; use `IsBlank`.
+- `ToUpper` / `ToLower` → not Power Fx functions.
+- Dropping the `Local.` / `Global.` scope prefix.
+
+---
+
+# Part VIII: Exam traps
+
+## 24. Common traps
 
 - Choosing the most advanced product instead of the simplest suitable service.
 - Missing one constraint such as geography, identity, latency or throughput.
@@ -483,9 +523,160 @@ For code questions:
 
 ---
 
-# Part VIII: Final readiness review
 
-## 24. Rapid review
+# Part VIII-A: Personal Weak-Point Review
+
+These are recurring patterns from practice-test mistakes. Review this section before the final readiness review.
+
+## 24A. Agent tool decision rules
+
+```text
+Agent may decide whether to use a tool → tool_choice="auto"
+Agent must use at least one tool       → tool_choice="required"
+Agent must not use tools               → tool_choice="none"
+```
+
+**Exam clues for `required`:** must always search, retrieve, use knowledge or provide citations.
+
+## 24B. File Search vs Azure AI Search
+
+```text
+Files uploaded in the current conversation → File Search
+Indexed enterprise content repository       → Azure AI Search
+```
+
+**Trap:** Do not choose Azure AI Search merely because a document must be searched. First decide whether it is a conversational upload or an indexed collection.
+
+## 24C. Agent, tool and connection
+
+```text
+Agent → invokes a tool
+Tool  → uses a connection
+Connection → holds the endpoint and authentication configuration
+```
+
+```text
+API key already exists
+Connection is already configured
+Authentication header is missing
+→ Link the tool or API integration to the connection
+```
+
+## 24D. OpenAPI authentication
+
+```text
+API key in a request header → apiKey security scheme
+OAuth authorisation flow    → OAuth2 security scheme
+Bearer access token         → HTTP bearer security scheme
+```
+
+Look for `securitySchemes` when credentials must be applied automatically. Avoid hard-coded secrets, prompt variables and manual credential injection.
+
+## 24E. RBAC distinctions
+
+| Requirement | Likely role |
+|---|---|
+| Invoke or consume an AI capability | Cognitive Services User |
+| Create, configure or deploy resources without managing RBAC | Cognitive Services Contributor |
+| Manage resources and role assignments | Owner |
+
+**Exam clue:** Create and configure resources, but do not manage access control → **Cognitive Services Contributor**.
+
+## 24F. Cost, quality and execution telemetry
+
+```text
+Why are costs increasing?       → Inspect token usage
+Was the generated result good?  → Evaluation
+What happened during execution? → Observability and traces
+```
+
+```text
+enable_content_recording=true
+→ prompts, responses and tool content can be included in telemetry
+```
+
+**Risk:** Content recording can expose sensitive content to the telemetry pipeline.
+
+## 24G. Scanned PDFs and RAG
+
+```text
+Scanned PDF + tables + page references
+→ OCR + page-aware chunking
+```
+
+Page-aware chunking helps preserve page boundaries, citations and structured content.
+
+## 24H. Mixed-language translation
+
+```text
+Multiple languages in one segment
+→ split into single-language segments
+→ translate each segment
+→ recombine the result
+```
+
+## 24I. Rate limiting and retries
+
+```text
+HTTP 429 / throttling / burst traffic
+→ exponential backoff with jitter
+```
+
+Immediate retries can amplify throttling. Jitter prevents many clients from retrying at the same moment.
+
+## 24J. Image-generation fidelity
+
+```text
+Preserve the reference image's appearance, colours, shape or design
+→ use high input_fidelity
+```
+
+```text
+Higher fidelity → more faithful to the input
+Lower fidelity  → more creative freedom
+```
+
+## 24K. Conversation continuity
+
+```text
+Remember messages, tool calls and responses in the current session
+→ conversation history
+```
+
+Do not confuse current-session continuity with a persistent knowledge store or external memory system.
+
+## 24L. Approval variables and exact values
+
+When a workflow stores an approval response, compare the variable with the exact value returned by the approval step.
+
+```text
+approval == "approved"
+```
+
+**Trap:** Do not assume a Boolean value or invent a synonym such as `"yes"` when the stored response is an explicit status string.
+
+## Personal weakness check
+
+Before booking, confirm that you can explain without notes:
+
+- Why `tool_choice="required"` differs from `auto`.
+- When File Search is preferable to Azure AI Search.
+- How an agent, tool and connection relate to one another.
+- How OpenAPI `securitySchemes` apply credentials.
+- Why Contributor fits resource management without RBAC management.
+- Why token usage explains cost while evaluation measures quality.
+- What content recording can place in telemetry.
+- Why OCR and page-aware chunking suit scanned structured PDFs.
+- Why mixed-language segments should be separated before translation.
+- Why HTTP 429 calls for exponential backoff with jitter.
+- What high `input_fidelity` controls.
+- When conversation history is enough and persistent storage is unnecessary.
+- Why workflow conditions must use the exact stored status value.
+
+
+# Part IX: Final readiness review
+
+## 25. Rapid review
 
 ```text
 Text meaning                         → Azure AI Language
@@ -517,7 +708,7 @@ Preferred and rejected answers      → DPO
 Reliable reward or grader           → RFT
 ```
 
-## 25. Booking checklist
+## 26. Booking checklist
 
 Consider booking when you can, without opening detailed notes:
 
