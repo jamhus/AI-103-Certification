@@ -13,8 +13,8 @@ Before looking at the answers, identify:
 1. **Input:** text, image, audio, document, search query, prompt or multimodal content?
 2. **Output:** classification, extraction, generation, retrieval, translation or action?
 3. **Operation:** create, configure, deploy, invoke, analyse, monitor or evaluate?
-4. **Constraint:** identity, region, residency, latency, throughput, cost or safety?
-5. **Level:** service, resource, deployment, SDK client, method, role or Responsible AI principle?
+4. **Constraint:** identity, region, residency, latency, throughput, cost, safety or GA/preview status?
+5. **Level:** service, resource, deployment, model ID, API version, SDK client/version, method, role or Responsible AI principle?
 
 **Golden rule:** Choose the simplest supported service that satisfies every explicit requirement.
 
@@ -56,7 +56,9 @@ Generate new text → Generative model
 | Text to speech | Speech synthesis |
 | Spoken-language translation | Speech translation |
 | Control pronunciation and speaking style | SSML |
+| Bias recognition toward a small set of expected terms at runtime | Phrase List |
 | Improve recognition for domain vocabulary | Custom Speech |
+| Evaluate a speaker's pronunciation | Pronunciation Assessment |
 
 ```text
 SpeechConfig          → Configuration
@@ -645,6 +647,8 @@ Remember messages, tool calls and responses in the current session
 
 Do not confuse current-session continuity with a persistent knowledge store or external memory system.
 
+For cross-conversation personalisation, review **24S: Foundry Memory (preview)** below.
+
 ## 24L. Approval variables and exact values
 
 When a workflow stores an approval response, compare the variable with the exact value returned by the approval step.
@@ -654,6 +658,186 @@ approval == "approved"
 ```
 
 **Trap:** Do not assume a Boolean value or invent a synonym such as `"yes"` when the stored response is an explicit status string.
+
+## 24M. API/version literacy
+
+An API version belongs to an **individual service contract**, not to Azure AI or Foundry as a whole. Check the exact service, operation and documented version.
+
+| Contract | Version to recognise | Status |
+|---|---|---|
+| Content Safety Prompt Shields REST API | `2024-09-01` | GA |
+| Document Intelligence v4 REST API | `2024-11-30` | GA |
+| Speech-to-text REST API | `2025-10-15` | Current GA |
+
+**Version snapshot:** Verified against Microsoft Learn on 2026-11-01. Recheck the service reference when a question specifies another version or when preparing a deployment.
+
+```text
+Model ID/version → Which model or model revision performs the task?
+API version      → Which service request/response contract is used?
+SDK version      → Which client-library release is installed?
+Deployment name  → Which deployed model instance is invoked?
+```
+
+- A date-looking model revision is not automatically an API version.
+- An SDK release number does not replace the REST `api-version`.
+- A newer-looking date is not evidence that a version exists, is supported by that service or is GA.
+- A `-preview` suffix flags a preview contract; also check feature-specific status rather than relying on naming alone.
+
+**Sources:** [Prompt Shields REST quickstart](https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-jailbreak), [Document Intelligence version support](https://learn.microsoft.com/azure/ai-services/document-intelligence/overview?view=doc-intel-4.0.0#version-support-and-retirement), [Speech REST migration guide](https://learn.microsoft.com/azure/ai-services/speech-service/migrate-2025-10-15).
+
+## 24N. REST contract recognition
+
+Recognise **exact property names and their location**, not just the feature description.
+
+| Service / operation | Contract element | Meaning |
+|---|---|---|
+| Prompt Shields: `text:shieldPrompt` | `userPrompt` | User text to analyse for prompt attacks |
+| Prompt Shields: `text:shieldPrompt` | `documents` | Array of document text to analyse for injected instructions; not document URLs |
+| Speech batch transcription | Root `contentUrls` | Array of individual audio-file URLs |
+| Speech batch transcription | Root `contentContainerUrl` | URL of the container holding the audio files |
+| Speech batch transcription | `properties.diarizationEnabled` | Enable speaker separation, not speaker identity recognition |
+| Speech batch transcription | `properties.timeToLiveHours` | Retention after the job completes, not its execution timeout |
+| Document Intelligence analysis | Model ID `prebuilt-layout` | Extract text, tables and document structure |
+| Content Safety: `text:analyze` | `haltOnBlocklistHit` | Decide whether a blocklist hit stops further harmful-content analysis |
+
+- Batch audio input: specify either `contentUrls` or `contentContainerUrl`.
+- Batch `diarizationEnabled` and `timeToLiveHours` belong inside `properties`, not at the root.
+- In the current batch contract, `timeToLiveHours` is required: 6 hours to 31 days; 48 hours is the documented recommendation when consuming results directly.
+- `haltOnBlocklistHit=true`: a blocklist hit skips further harmful-content analysis.
+- `haltOnBlocklistHit=false`: harmful-content analysis continues even if a blocklist matches.
+
+**Traps:** Prompt Shields checks injected instructions, not general harmful-content categories. `haltOnBlocklistHit` controls analysis short-circuiting; it does not itself implement the application's blocking policy. Do not copy batch transcription properties into fast-transcription requests: those are different operation contracts.
+
+**Sources:** [Prompt Shields request](https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-jailbreak#quick-example), [Batch transcription configuration](https://learn.microsoft.com/azure/ai-services/speech-service/batch-transcription-create#request-configuration-options), [Document Intelligence layout model](https://learn.microsoft.com/azure/ai-services/document-intelligence/prebuilt/layout?view=doc-intel-4.0.0), [Content Safety text request](https://learn.microsoft.com/azure/ai-services/content-safety/quickstart-text#analyze-text-content).
+
+## 24O. Language sentiment aggregation
+
+Document sentiment is determined from the **sentence labels**:
+
+| Sentence labels present | Document label |
+|---|---|
+| Positive, with any remaining sentences neutral | `positive` |
+| Negative, with any remaining sentences neutral | `negative` |
+| Both positive and negative, with or without neutral sentences | `mixed` |
+| Neutral only | `neutral` |
+
+```text
+positive + neutral  → positive
+negative + neutral  → negative
+positive + negative → mixed
+neutral only        → neutral
+```
+
+**Trap:** Neutral sentences do not turn an otherwise positive or negative document into `mixed`. Do not use majority voting: the presence of both positive and negative sentence labels produces `mixed`.
+
+**Source:** [Sentiment analysis document-label rules](https://learn.microsoft.com/azure/ai-services/language-service/sentiment-opinion-mining/how-to/call-api#sentiment-analysis).
+
+## 24P. Speech recognition optimisation
+
+| Requirement | Choose | Why |
+|---|---|---|
+| Small set of expected names, product names or terms at runtime | Phrase List | Biases recognition without training a model |
+| Persistent domain-specific recognition accuracy | Custom Speech | Adapts a model using domain training data |
+| Score pronunciation, fluency or completeness | Pronunciation Assessment | Evaluates how speech is pronounced |
+
+```text
+Expected vocabulary for this recognition session → Phrase List
+Reusable domain-adapted recognition model         → Custom Speech
+Evaluate the speaker's pronunciation              → Pronunciation Assessment
+```
+
+**Traps:** Pronunciation Assessment is not a vocabulary-correction feature. Phrase lists bias recognition; they do not guarantee a term will be recognised. Check the recognition route: phrase lists support real-time recognition and supported fast-transcription APIs, but not batch transcription.
+
+**Sources:** [Phrase lists](https://learn.microsoft.com/azure/ai-services/speech-service/improve-accuracy-phrase-list), [Custom Speech](https://learn.microsoft.com/azure/ai-services/speech-service/custom-speech-overview), [Pronunciation Assessment](https://learn.microsoft.com/azure/ai-services/speech-service/how-to-pronunciation-assessment).
+
+## 24Q. Custom Speech model lifecycle
+
+An expired custom or base model is no longer available for transcription. The result depends on **how the model is invoked**:
+
+| Route | Expired-model behaviour | Action |
+|---|---|---|
+| Recognition through a custom endpoint | Falls back to the most recent base model for the same locale | Update the endpoint to a non-expired model |
+| Batch transcription explicitly referencing an expired model | Fails with a 4xx error | Reference a non-expired model, or omit `model` to use the latest base model |
+
+```text
+Custom endpoint + expired model → base-model fallback; domain accuracy can drop
+Batch + explicit expired model → 4xx failure; no automatic fallback
+```
+
+**Trap:** A successful response from a custom endpoint does not prove the custom model is still being used. Monitor expiration and validate accuracy after replacing the model; do not confuse model expiration with API-version retirement.
+
+**Source:** [Custom Speech expiration behaviour](https://learn.microsoft.com/azure/ai-services/speech-service/how-to-custom-speech-model-and-endpoint-lifecycle#what-to-do-when-a-model-expires).
+
+## 24R. Azure AI Search lexical analysis
+
+```text
+Input text → character filters → tokenizer → token filters → indexed/query tokens
+```
+
+- **Character filters:** Transform text before tokenisation, such as removing markup.
+- **Tokenizer:** Splits the resulting text into tokens.
+- **Token filters:** Transform or remove tokens after tokenisation, such as lowercasing.
+- **`CustomAnalyzer`:** Combines exactly one tokenizer with optional character and token filters. REST type: `#Microsoft.Azure.Search.CustomAnalyzer`.
+- **`keyword_v2`:** Preserves the input as a whole-value token, subject to its maximum token length.
+
+| Content | Analysis goal |
+|---|---|
+| Natural-language descriptions | Split into useful words; apply appropriate linguistic analysis |
+| Product codes and identifiers | Preserve the complete value rather than splitting on punctuation |
+
+```text
+Product code AB-123/CD must remain one searchable term
+→ CustomAnalyzer with keyword_v2
+→ optionally lowercase if case-insensitive matching is required
+```
+
+**Traps:** `keyword_v2` is a tokenizer, not a language analyzer. Character/token filters can still alter the value. Its default maximum token length is 256 characters (configurable up to 300); longer inputs are split. Apply compatible analysis at indexing and query time. For exact conditions on filterable identifier fields, consider a filter rather than full-text search.
+
+**Sources:** [Custom analyzer pipeline and tokenizer reference](https://learn.microsoft.com/azure/search/index-add-custom-analyzers), [Whole-value tokenisation example](https://learn.microsoft.com/azure/search/tutorial-create-custom-analyzer#build-a-custom-analyzer).
+
+## 24S. Foundry Memory (preview)
+
+```text
+Conversation state → Messages, tool calls and responses in a conversation
+Persistent memory → Selected information retained and retrieved across conversations
+Memory store      → Holds memory items partitioned by scope
+```
+
+| Element | Purpose |
+|---|---|
+| `MemorySearchPreviewTool` | Attach memory access to a prompt agent |
+| `scope` | Partition memory items into isolated collections within a store |
+| `{{$userId}}` | Resolve the memory search tool's scope to the end user |
+| `update_delay` | Debounce automatic memory writes until the configured inactivity period, in seconds |
+
+- For per-user memory through the agent tool, set `scope` to `{{$userId}}`.
+- In backend/proxy scenarios, supply `x-memory-user-id` on each response call from the authenticated end-user identity.
+- Without that header, scope resolution falls back to the caller's Microsoft Entra tenant/object identity. A shared backend identity is not automatically a distinct identity for each end user.
+- A static scope shares that collection among calls using the same scope; it does not provide per-user isolation.
+- Low-level memory API calls require an explicit scope; they do not automatically extract the end-user identity.
+- Automatic updates are scheduled after responses and debounced by `update_delay`; do not assume every turn is written immediately.
+
+**Traps:** Memory is not simply the complete conversation transcript or an enterprise document index. Foundry Memory and the Memory Store API are **preview**; recheck the current SDK/schema and deployment terms.
+
+**Source:** [Create and use Foundry memory: scope, tool and update behaviour](https://learn.microsoft.com/azure/foundry/agents/how-to/memory-usage).
+
+## 24T. Preview versus GA
+
+Treat availability status as a **deployment and risk constraint**, not a cosmetic label.
+
+```text
+Visible in the portal → Available to try; not proof of GA
+Newer API date        → Not proof of GA or service compatibility
+Production/SLA need   → Check feature status, support and applicable terms
+Explicit GA-only need → Exclude preview features/contracts
+```
+
+- Check both the service API version and the particular feature's status: a feature can be preview within a broader GA service.
+- For production or SLA scenarios, explicitly evaluate preview terms, support commitments, regional availability and change risk.
+- Do not assume a parent service's SLA automatically covers a preview feature.
+- Preview is not automatically forbidden for every workload; it must satisfy the question's explicit requirements and the organisation's accepted risk.
+
+**Source:** [Foundry Memory preview notice and applicable terms](https://learn.microsoft.com/azure/foundry/agents/how-to/memory-usage).
 
 ## Personal weakness check
 
@@ -672,6 +856,18 @@ Before booking, confirm that you can explain without notes:
 - What high `input_fidelity` controls.
 - When conversation history is enough and persistent storage is unnecessary.
 - Why workflow conditions must use the exact stored status value.
+- Why model IDs, API versions, SDK versions and deployment names are different.
+- Which service contracts use `2024-09-01`, `2024-11-30` and `2025-10-15`.
+- Where Prompt Shields and batch transcription request properties belong.
+- What `prebuilt-layout` and `haltOnBlocklistHit` mean.
+- How positive, negative and neutral sentence labels determine document sentiment.
+- When to use Phrase List, Custom Speech or Pronunciation Assessment.
+- Why expired Custom Speech models cause endpoint fallback but explicit batch references fail.
+- How character filters, tokenizers and token filters differ.
+- Why `keyword_v2` suits whole-value product identifiers.
+- How Foundry memory differs from conversation state and isolates end users by scope.
+- What `update_delay` controls and why Foundry Memory's preview status matters.
+- Why portal availability and a newer API date do not establish GA or SLA coverage.
 
 
 # Part IX: Final readiness review
@@ -721,6 +917,10 @@ Consider booking when you can, without opening detailed notes:
 - Identify all Responsible AI principles from scenarios.
 - Explain observability versus evaluation.
 - Explain SFT versus DPO versus RFT.
+- Recognise exact REST fields and service-specific API versions.
+- Apply sentiment aggregation, Speech optimisation and expired-model decision rules.
+- Choose lexical analysis for natural language versus whole-value identifiers.
+- Explain persistent memory, per-user scope and preview deployment constraints.
 - Explain why the strongest distractor is wrong.
 
 ### Final test
